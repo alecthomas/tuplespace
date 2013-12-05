@@ -72,7 +72,6 @@ func newWaiter(cancel chan *tupleWaiter, match Tuple, timeout time.Duration, act
 }
 
 type tupleSpaceImpl struct {
-	name         string
 	tuples       map[*tupleEntry]interface{}
 	waiters      map[*tupleWaiter]interface{}
 	in           chan *tupleEntry
@@ -84,9 +83,8 @@ type tupleSpaceImpl struct {
 	statsUpdated *sync.Cond
 }
 
-func NewTupleSpace(name string) TupleSpace {
+func NewTupleSpace() TupleSpace {
 	ts := &tupleSpaceImpl{
-		name:         name,
 		tuples:       make(map[*tupleEntry]interface{}),
 		waiters:      make(map[*tupleWaiter]interface{}),
 		in:           make(chan *tupleEntry, 16),
@@ -204,12 +202,8 @@ func (t *tupleSpaceImpl) purge() {
 	log.Fine("Purged %d tuples and %d waiters", tuples, waiters)
 }
 
-func (t *tupleSpaceImpl) Name() string {
-	return t.name
-}
-
 func (t *tupleSpaceImpl) Send(tuple Tuple, timeout time.Duration) error {
-	log.Debug("Send(%v, %v)", tuple, timeout)
+	log.Debug("Send(%s, %s)", tuple, timeout)
 	var expires time.Time
 	if timeout != 0 {
 		expires = time.Now().Add(timeout)
@@ -221,6 +215,7 @@ func (t *tupleSpaceImpl) Send(tuple Tuple, timeout time.Duration) error {
 
 func (t *tupleSpaceImpl) ReadOperation(match Tuple, timeout time.Duration, actions int) ReadOperationHandle {
 	waiter := newWaiter(t.cancel, match, timeout, actions)
+	log.Debug("ReadOperation(%s)", waiter)
 	t.waitersIn <- waiter
 	return waiter
 }

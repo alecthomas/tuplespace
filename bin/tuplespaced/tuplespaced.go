@@ -85,14 +85,35 @@ func takeOrRead(take bool, ts tuplespace.TupleSpace, w http.ResponseWriter,
 	}
 
 	if err != nil {
-		status := 500
+		status := http.StatusInternalServerError
 		if err == tuplespace.ReaderTimeout {
-			status = 504
+			status = http.StatusGatewayTimeout
+		} else if err == tuplespace.CancelledReader {
+			status = http.StatusRequestTimeout
 		}
 		resp.JSON(status, &tuplespace.ErrorResponse{Error: err.Error()})
 	} else {
-		resp.JSON(200, &tuplespace.ReadResponse{Tuples: tuples})
+		resp.JSON(http.StatusOK, &tuplespace.ReadResponse{Tuples: tuples})
 	}
+}
+
+func makeService() *martini.Martini {
+	ts := tuplespace.NewTupleSpace()
+
+	m := martini.New()
+	m.Use(martini.Recovery())
+	m.Use(martini.Logger())
+	m.Use(render.Renderer("."))
+
+	m.MapTo(ts, (*tuplespace.TupleSpace)(nil))
+
+	r := martini.NewRouter()
+	r.Post("/tuplespace/", binding.Json(tuplespace.SendRequest{}), Send)
+	r.Get("/tuplespace/", binding.Json(tuplespace.ReadRequest{}), Read)
+	r.Delete("/tuplespace/", binding.Json(tuplespace.ReadRequest{}), Take)
+
+	m.Action(r.Handle)
+	return m
 }
 
 func main() {
@@ -111,30 +132,15 @@ func main() {
 	log.AddFilter("stdout", logLevels[*logLevelFlag], log.NewConsoleLogWriter())
 
 	log.Info("Starting server on http://%s/tuplespace/", *bindFlag)
-	ts := tuplespace.NewTupleSpace("default")
 
 	if *profilerFlag {
 		log.Warn("Running with profiler under http://localhost:6060/debug/pprof/")
 		go func() { log.Error("%s", http.ListenAndServe("localhost:6060", nil)) }()
 	}
 
-	m := martini.New()
-	m.Use(martini.Recovery())
-	m.Use(martini.Logger())
-	m.Use(render.Renderer("."))
-
-	m.MapTo(ts, (*tuplespace.TupleSpace)(nil))
-
-	r := martini.NewRouter()
-	r.Post("/tuplespace/", binding.Json(tuplespace.SendRequest{}), Send)
-	r.Get("/tuplespace/", binding.Json(tuplespace.ReadRequest{}), Read)
-	r.Delete("/tuplespace/", binding.Json(tuplespace.ReadRequest{}), Take)
-
-	m.Action(r.Handle)
-
 	srv := &http.Server{
 		Addr:         *bindFlag,
-		Handler:      m,
+		Handler:      makeService(),
 		ReadTimeout:  *readTimeoutFlag,
 		WriteTimeout: *writeTimeoutFlag,
 	}

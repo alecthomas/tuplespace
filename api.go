@@ -7,8 +7,8 @@ import (
 )
 
 type TupleSpaceStats struct {
-	Waiters int
-	Tuples  int
+	Waiters int `json:"waiters"`
+	Tuples  int `json:"tuples"`
 }
 
 func (t *TupleSpaceStats) String() string {
@@ -38,8 +38,6 @@ type ReadOperationHandle interface {
 
 // A TupleSpace provides a shared space for delivering and receiving tuples.
 type TupleSpace interface {
-	Name() string
-
 	// Send a tuple into the tuplespace, with an optional timeout.
 	Send(tuple Tuple, timeout time.Duration) error
 
@@ -58,29 +56,9 @@ type TupleSpace interface {
 	// Take (read and remove) all tuples from the tuplespace, with an optional timeout.
 	TakeAll(match Tuple, timeout time.Duration) ([]Tuple, error)
 
-	// Create a reservation on a matching tuple.
-	// A reservation provides exclusive access to a tuple for a period of time
-	// (the reservation timeout). During this time a reservation can be marked
-	// as complete, or cancelled. If marked complete the tuple will be removed
-	// from the tuplespace. If the reservation is cancelled or times out, the
-	// tuple will be returned to the tuplespace.
-	// Reserve(match Tuple, timeout time.Duration, reservation time.Duration) (Reservation, error)
-
 	// Shutdown the tuplespace.
 	Shutdown() error
 
 	// Statistics for the tuplespace.
 	Stats() TupleSpaceStats
 }
-
-// A tuple reservation.
-// type Reservation interface {
-// 	// The reserved tuple.
-// 	Tuple() Tuple
-
-// 	// Complete the reservation, removing the tuple and reservation from the server.
-// 	Complete() error
-
-// 	// Cancel the reservation, returning the associated tuple back to the tuplespace.
-// 	Cancel() error
-// }

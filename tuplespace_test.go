@@ -24,7 +24,7 @@ func TestTupleDoesNotMatch(t *testing.T) {
 }
 
 func TestTupleSpaceRead(t *testing.T) {
-	ts := NewTupleSpace("test")
+	ts := NewTupleSpace()
 	defer ts.Shutdown()
 	ts.Send(Tuple{"cmd", "uname -a"}, 0)
 	ts.Send(Tuple{"cmd", "uptime"}, 0)
@@ -34,7 +34,7 @@ func TestTupleSpaceRead(t *testing.T) {
 }
 
 func TestTupleSpaceReadAll(t *testing.T) {
-	ts := NewTupleSpace("test")
+	ts := NewTupleSpace()
 	defer ts.Shutdown()
 	ts.Send(Tuple{"cmd", "uname -a"}, 0)
 	ts.Send(Tuple{"cmd", "uptime"}, 0)
@@ -46,7 +46,7 @@ func TestTupleSpaceReadAll(t *testing.T) {
 }
 
 func TestTupleSpaceTake(t *testing.T) {
-	ts := NewTupleSpace("test")
+	ts := NewTupleSpace()
 	defer ts.Shutdown()
 	ts.Send(Tuple{"cmd", "uname -a"}, 0)
 	ts.Send(Tuple{"cmd", "uptime"}, 0)
@@ -56,7 +56,7 @@ func TestTupleSpaceTake(t *testing.T) {
 }
 
 func TestTupleSpaceTakeAll(t *testing.T) {
-	ts := NewTupleSpace("test")
+	ts := NewTupleSpace()
 	defer ts.Shutdown()
 	ts.Send(Tuple{"cmd", "uname -a"}, 0)
 	ts.Send(Tuple{"cmd", "uptime"}, 0)
@@ -70,7 +70,7 @@ func TestTupleSpaceTakeAll(t *testing.T) {
 func TestTupleSpaceStressTestSend(t *testing.T) {
 	log.AddFilter("stdout", log.INFO, log.NewConsoleLogWriter())
 
-	ts := NewTupleSpace("test")
+	ts := NewTupleSpace()
 	defer ts.Shutdown()
 
 	for i := 0; i < 10000; i++ {
@@ -83,7 +83,7 @@ func TestTupleSpaceStressTestSend(t *testing.T) {
 }
 
 func TestTupleSpaceStressTestSendAndReadConcurrently(t *testing.T) {
-	ts := NewTupleSpace("test")
+	ts := NewTupleSpace()
 	defer ts.Shutdown()
 
 	for i := 0; i < 10000; i++ {
@@ -96,7 +96,7 @@ func TestTupleSpaceStressTestSendAndReadConcurrently(t *testing.T) {
 }
 
 func BenchmarkTupleSpaceSend(b *testing.B) {
-	ts := NewTupleSpace("test")
+	ts := NewTupleSpace()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ts.Send(Tuple{"cmd", "uname -a"}, 0)
@@ -104,7 +104,7 @@ func BenchmarkTupleSpaceSend(b *testing.B) {
 }
 
 func BenchmarkTupleSpaceRead(b *testing.B) {
-	ts := NewTupleSpace("test")
+	ts := NewTupleSpace()
 	for i := 0; i < b.N; i++ {
 		ts.Send(Tuple{"cmd", "uname -a"}, 0)
 	}
@@ -115,7 +115,7 @@ func BenchmarkTupleSpaceRead(b *testing.B) {
 }
 
 func BenchmarkTupleSpaceTake(b *testing.B) {
-	ts := NewTupleSpace("test")
+	ts := NewTupleSpace()
 	for i := 0; i < b.N; i++ {
 		ts.Send(Tuple{"cmd", "uname -a"}, 0)
 	}

@@ -43,8 +43,8 @@ Read all tuples from the tuplespace, with an optional timeout.
 Install the server and client with:
 
 ```bash
-$ go get github.com/alecthomas/tuplespace/cmd/tuplespaced
-$ go get github.com/alecthomas/tuplespace/cmd/tuplespace
+$ go get github.com/alecthomas/tuplespace/bin/tuplespaced
+$ go get github.com/alecthomas/tuplespace/bin/tuplespace
 ```
 
 ### Running the RESTful API server
@@ -57,6 +57,19 @@ $ tuplespaced --bind=0.0.0.0:2619
 
 By default the server will listen on `127.0.0.1:2619`.
 
+### Running the client binary
+
+Send a tuple:
+
+```bash
+$ tuplespace send '["cmd", "uname -a"]'
+```
+
+Read a tuple:
+```bash
+$ tuplespace read '["cmd", null]'
+("cmd", "uname -a")
+```
 
 ### RESTful API
 

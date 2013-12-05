@@ -3,13 +3,18 @@ package tuplespace
 import (
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 // A Tuple represents a stored tuple.
 type Tuple []interface{}
 
 func (t Tuple) String() string {
-	return fmt.Sprintf("%#v", t)
+	tuple := []string{}
+	for _, e := range t {
+		tuple = append(tuple, fmt.Sprintf("%#v", e))
+	}
+	return fmt.Sprintf("(%s)", strings.Join(tuple, ", "))
 }
 
 // Match applies the current tuple as a match template against u.
