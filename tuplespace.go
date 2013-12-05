@@ -78,6 +78,7 @@ type tupleSpaceImpl struct {
 	statsUpdated *sync.Cond
 }
 
+// NewTupleSpace creates a new tuple store using the given storage backend.
 func NewTupleSpace(store TupleStore) TupleSpace {
 	ts := &tupleSpaceImpl{
 		waiters:      make(map[*tupleWaiter]interface{}),
@@ -158,7 +159,7 @@ func (t *tupleSpaceImpl) processNewEntry(entry *TupleEntry) {
 }
 
 func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
-	stored, err := t.store.NearMatch(waiter.match)
+	stored, err := t.store.Match(waiter.match)
 	if err != nil {
 		panic(err.Error())
 	}

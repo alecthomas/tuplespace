@@ -1,4 +1,4 @@
-package memory
+package store
 
 import (
 	"github.com/alecthomas/tuplespace"
@@ -14,7 +14,7 @@ type MemoryStore struct {
 }
 
 // NewMemoryStore creates a new in-memory tuple store.
-func NewMemoryStore() tuplespace.TupleStore {
+func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		tuples: make(map[uint64]*tuplespace.TupleEntry),
 	}
@@ -30,7 +30,7 @@ func (m *MemoryStore) Put(tuple tuplespace.Tuple, timeout time.Time) error {
 	return nil
 }
 
-func (m *MemoryStore) NearMatch(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, error) {
+func (m *MemoryStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, error) {
 	now := time.Now()
 	matches := []*tuplespace.TupleEntry{}
 	for _, entry := range m.tuples {

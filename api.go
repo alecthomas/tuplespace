@@ -18,9 +18,9 @@ type TupleEntry struct {
 type TupleStore interface {
 	// Put a tuple into the store.
 	Put(tuple Tuple, timeout time.Time) error
-	// NearMatch retrieves tuples that area close matches to match. This MUST NOT
+	// Match retrieves tuples from the store that match "match". This MUST NOT
 	// return expired tuples.
-	NearMatch(match Tuple) ([]*TupleEntry, error)
+	Match(match Tuple) ([]*TupleEntry, error)
 	// Delete an entry in the store. "id" is TupleEntry.ID.
 	Delete(id uint64) error
 	// Shutdown the store.

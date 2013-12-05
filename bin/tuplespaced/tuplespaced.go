@@ -4,7 +4,7 @@ import (
 	"fmt"
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
-	"github.com/alecthomas/tuplespace/store/memory"
+	"github.com/alecthomas/tuplespace/store"
 	"github.com/codegangsta/martini"
 	"github.com/codegangsta/martini-contrib/binding"
 	"github.com/codegangsta/martini-contrib/render"
@@ -22,7 +22,8 @@ var (
 	writeTimeoutFlag = pflag.Duration("write_timeout", 30*time.Second, "HTTP server write timeout")
 	ncpuFlag         = pflag.Int("ncpu", runtime.NumCPU(), "number of cpus to use")
 	logLevelFlag     = pflag.String("log-level", "info", "log level (finest, fine, debug, info, warning, error, critical)")
-	storeFlag        = pflag.String("store", "memory", "set storage backend (memory)")
+	storeFlag        = pflag.String("store", "memory", "set storage backend (memory, leveldb)")
+	dbFlag           = pflag.String("db", "tuplestore.db", "path to database")
 
 	logLevels = map[string]log.Level{
 		"finest":   log.FINEST,
@@ -34,10 +35,16 @@ var (
 		"critical": log.CRITICAL,
 	}
 
-	stores = map[string]func() tuplespace.TupleStore{
-		"memory": func() tuplespace.TupleStore { return memory.NewMemoryStore() },
+	stores = map[string]func() (tuplespace.TupleStore, error){
+		"memory":  func() (tuplespace.TupleStore, error) { return store.NewMemoryStore(), nil },
+		"leveldb": func() (tuplespace.TupleStore, error) { return store.NewLevelDBTupleStore(*dbFlag) },
 	}
 )
+
+func fatalf(f string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "error: "+f, args...)
+	os.Exit(1)
+}
 
 func Send(ts tuplespace.TupleSpace, req tuplespace.SendRequest, resp render.Render, errors binding.Errors) {
 	if errors.Count() > 0 {
@@ -103,10 +110,12 @@ func takeOrRead(take bool, ts tuplespace.TupleSpace, w http.ResponseWriter,
 	}
 }
 
-func makeService(ts tuplespace.TupleSpace) *martini.Martini {
+func makeService(ts tuplespace.TupleSpace, debug bool) *martini.Martini {
 	m := martini.New()
 	m.Use(martini.Recovery())
-	m.Use(martini.Logger())
+	if debug {
+		m.Use(martini.Logger())
+	}
 	m.Use(render.Renderer("."))
 
 	m.MapTo(ts, (*tuplespace.TupleSpace)(nil))
@@ -124,16 +133,17 @@ func main() {
 	pflag.Usage = func() {
 		fmt.Printf(`usage: tuplespaced [flags]
 
-	Run tuplespace server.
+Run tuplespace server.
 
-	Flags:
-	`)
+Flags:
+`)
 		pflag.PrintDefaults()
 	}
 	pflag.Parse()
 	runtime.GOMAXPROCS(*ncpuFlag)
 
 	log.AddFilter("stdout", logLevels[*logLevelFlag], log.NewConsoleLogWriter())
+	debug := logLevels[*logLevelFlag] <= log.DEBUG
 
 	log.Info("Starting server on http://%s/tuplespace/", *bindFlag)
 
@@ -142,18 +152,20 @@ func main() {
 		go func() { log.Error("%s", http.ListenAndServe("localhost:6060", nil)) }()
 	}
 
-	store := stores[*storeFlag]()
+	store, err := stores[*storeFlag]()
+	if err != nil {
+		fatalf("failed to initialise store %s: %s", *storeFlag, err.Error())
+	}
 	ts := tuplespace.NewTupleSpace(store)
 
 	srv := &http.Server{
 		Addr:         *bindFlag,
-		Handler:      makeService(ts),
+		Handler:      makeService(ts, debug),
 		ReadTimeout:  *readTimeoutFlag,
 		WriteTimeout: *writeTimeoutFlag,
 	}
-	err := srv.ListenAndServe()
+	err = srv.ListenAndServe()
 	if err != nil {
-		fmt.Printf("error: %s\n", err)
-		os.Exit(1)
+		fatalf("error: %s\n", err)
 	}
 }
