@@ -10,11 +10,6 @@ import (
 
 type tupleVisitor func(tuple Tuple) int
 
-type tupleEntry struct {
-	tuple   Tuple
-	timeout time.Time
-}
-
 type tupleWaiter struct {
 	match   Tuple
 	matches chan []Tuple
@@ -72,9 +67,9 @@ func newWaiter(cancel chan *tupleWaiter, match Tuple, timeout time.Duration, act
 }
 
 type tupleSpaceImpl struct {
-	tuples       map[*tupleEntry]interface{}
+	tuples       map[*TupleEntry]interface{}
 	waiters      map[*tupleWaiter]interface{}
-	in           chan *tupleEntry
+	in           chan *TupleEntry
 	waitersIn    chan *tupleWaiter
 	cancel       chan *tupleWaiter
 	shutdown     chan bool
@@ -85,9 +80,9 @@ type tupleSpaceImpl struct {
 
 func NewTupleSpace() TupleSpace {
 	ts := &tupleSpaceImpl{
-		tuples:       make(map[*tupleEntry]interface{}),
+		tuples:       make(map[*TupleEntry]interface{}),
 		waiters:      make(map[*tupleWaiter]interface{}),
-		in:           make(chan *tupleEntry, 16),
+		in:           make(chan *TupleEntry, 16),
 		waitersIn:    make(chan *tupleWaiter, 16),
 		cancel:       make(chan *tupleWaiter, 16),
 		shutdown:     make(chan bool, 1),
@@ -141,12 +136,12 @@ func (t *tupleSpaceImpl) updateStats() {
 	t.statsUpdated.Broadcast()
 }
 
-func (t *tupleSpaceImpl) processNewEntry(entry *tupleEntry) {
+func (t *tupleSpaceImpl) processNewEntry(entry *TupleEntry) {
 	for waiter := range t.waiters {
-		if waiter.match.Match(entry.tuple) {
+		if waiter.match.Match(entry.Tuple) {
 			delete(t.waiters, waiter)
 
-			waiter.matches <- []Tuple{entry.tuple}
+			waiter.matches <- []Tuple{entry.Tuple}
 
 			if waiter.actions&ActionTake != 0 {
 				return
@@ -160,8 +155,8 @@ func (t *tupleSpaceImpl) processNewEntry(entry *tupleEntry) {
 func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
 	var matches []Tuple
 	for entry := range t.tuples {
-		if waiter.match.Match(entry.tuple) {
-			matches = append(matches, entry.tuple)
+		if waiter.match.Match(entry.Tuple) {
+			matches = append(matches, entry.Tuple)
 			if waiter.actions&ActionTake != 0 {
 				delete(t.tuples, entry)
 			}
@@ -186,7 +181,7 @@ func (t *tupleSpaceImpl) purge() {
 	tuples := 0
 	now := time.Now()
 	for entry := range t.tuples {
-		if !entry.timeout.IsZero() && entry.timeout.Before(now) {
+		if !entry.Timeout.IsZero() && entry.Timeout.Before(now) {
 			delete(t.tuples, entry)
 			tuples++
 		}
@@ -208,7 +203,7 @@ func (t *tupleSpaceImpl) Send(tuple Tuple, timeout time.Duration) error {
 	if timeout != 0 {
 		expires = time.Now().Add(timeout)
 	}
-	entry := &tupleEntry{tuple: tuple, timeout: expires}
+	entry := &TupleEntry{Tuple: tuple, Timeout: expires}
 	t.in <- entry
 	return nil
 }

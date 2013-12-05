@@ -33,3 +33,8 @@ func (t Tuple) Match(u Tuple) bool {
 	}
 	return true
 }
+
+// Key returns the non-unique key for this tuple.
+func (t Tuple) Key() []byte {
+	return []byte(t.String())
+}

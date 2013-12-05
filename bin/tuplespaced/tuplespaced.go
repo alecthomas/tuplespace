@@ -35,16 +35,16 @@ var (
 
 func Send(ts tuplespace.TupleSpace, req tuplespace.SendRequest, resp render.Render, errors binding.Errors) {
 	if errors.Count() > 0 {
-		resp.JSON(400, &tuplespace.ErrorResponse{Error: "invalid request structure"})
+		resp.JSON(http.StatusBadRequest, &tuplespace.ErrorResponse{Error: "invalid request structure"})
 		return
 	}
 
 	err := ts.Send(req.Tuple, req.Timeout)
 
 	if err != nil {
-		resp.JSON(500, &tuplespace.ErrorResponse{Error: err.Error()})
+		resp.JSON(http.StatusInternalServerError, &tuplespace.ErrorResponse{Error: err.Error()})
 	} else {
-		resp.JSON(201, &tuplespace.SendResponse{})
+		resp.JSON(http.StatusCreated, &tuplespace.SendResponse{})
 	}
 }
 
@@ -59,7 +59,7 @@ func Take(ts tuplespace.TupleSpace, w http.ResponseWriter, req tuplespace.ReadRe
 func takeOrRead(take bool, ts tuplespace.TupleSpace, w http.ResponseWriter,
 	req tuplespace.ReadRequest, resp render.Render, errors binding.Errors) {
 	if errors.Count() > 0 {
-		resp.JSON(400, &tuplespace.ErrorResponse{Error: "invalid request structure"})
+		resp.JSON(http.StatusBadRequest, &tuplespace.ErrorResponse{Error: "invalid request structure"})
 		return
 	}
 

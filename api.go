@@ -6,6 +6,23 @@ import (
 	"time"
 )
 
+// A TupleEntry represents a stored tuple.
+type TupleEntry struct {
+	ID      uint64
+	Tuple   Tuple
+	Timeout time.Time
+}
+
+// A TupleStore handles efficient storage and retrieval of tuples.
+type TupleStore interface {
+	// Put a tuple into the store.
+	Put(tuple Tuple, timeout time.Duration) error
+	// Near retrieves tuples that area close matches to match.
+	Near(match Tuple) ([]*TupleEntry, error)
+	Delete(id uint64) error
+}
+
+// TupleSpaceStats contains statistics on the tuplespace.
 type TupleSpaceStats struct {
 	Waiters int `json:"waiters"`
 	Tuples  int `json:"tuples"`

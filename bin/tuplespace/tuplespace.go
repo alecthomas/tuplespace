@@ -16,7 +16,7 @@ import (
 var (
 	serverFlag      = pflag.String("server", "http://127.0.0.1:2619/tuplespace/", "tuplespace server address")
 	timeoutFlag     = pflag.Duration("timeout", time.Second*60, "tuplespace operation timeout")
-	countFlag       = pflag.Int("count", 1, "number of copies of the tuple to send")
+	copiesFlag      = pflag.Int("copies", 1, "number of copies of the tuple to send")
 	concurrencyFlag = pflag.Int("concurrency", 64, "number of parallel clients to use")
 )
 
@@ -72,7 +72,7 @@ Examples:
 	switch command {
 	case "send":
 		tuple := parseTuple(pflag.Arg(1))
-		log.Info("Sending %d tuples with concurrency of %d", *countFlag, *concurrencyFlag)
+		log.Info("Sending %d tuples with concurrency of %d", *copiesFlag, *concurrencyFlag)
 		requests := make(chan tuplespace.Tuple, *concurrencyFlag)
 		group := &sync.WaitGroup{}
 		for i := 0; i < 32; i++ {
@@ -87,7 +87,7 @@ Examples:
 				group.Done()
 			}()
 		}
-		for i := 0; i < *countFlag; i++ {
+		for i := 0; i < *copiesFlag; i++ {
 			requests <- tuple
 		}
 		close(requests)
