@@ -67,7 +67,7 @@ func newWaiter(cancel chan *tupleWaiter, match Tuple, timeout time.Duration, act
 }
 
 type tupleSpaceImpl struct {
-	tuples       map[*TupleEntry]interface{}
+	store        TupleStore
 	waiters      map[*tupleWaiter]interface{}
 	in           chan *TupleEntry
 	waitersIn    chan *tupleWaiter
@@ -78,15 +78,15 @@ type tupleSpaceImpl struct {
 	statsUpdated *sync.Cond
 }
 
-func NewTupleSpace() TupleSpace {
+func NewTupleSpace(store TupleStore) TupleSpace {
 	ts := &tupleSpaceImpl{
-		tuples:       make(map[*TupleEntry]interface{}),
 		waiters:      make(map[*tupleWaiter]interface{}),
 		in:           make(chan *TupleEntry, 16),
 		waitersIn:    make(chan *tupleWaiter, 16),
 		cancel:       make(chan *tupleWaiter, 16),
 		shutdown:     make(chan bool, 1),
 		statsUpdated: sync.NewCond(&sync.Mutex{}),
+		store:        store,
 	}
 	go ts.run()
 	return ts
@@ -112,6 +112,7 @@ func (t *tupleSpaceImpl) run() {
 		case <-reportStatsTimer:
 			t.reportStats()
 		case <-t.shutdown:
+			t.store.Shutdown()
 			return
 		}
 	}
@@ -131,7 +132,8 @@ func (t *tupleSpaceImpl) updateStats() {
 	t.statsUpdated.L.Lock()
 	defer t.statsUpdated.L.Unlock()
 	log.Finest("Updating stats")
-	t.stats.Tuples = len(t.tuples)
+	// TODO: Add stats to TupleStore interface.
+	// t.stats.Tuples = len(t.tuples)
 	t.stats.Waiters = len(t.waiters)
 	t.statsUpdated.Broadcast()
 }
@@ -149,16 +151,23 @@ func (t *tupleSpaceImpl) processNewEntry(entry *TupleEntry) {
 		}
 	}
 
-	t.tuples[entry] = nil
+	err := t.store.Put(entry.Tuple, entry.Timeout)
+	if err != nil {
+		panic(err.Error())
+	}
 }
 
 func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
+	stored, err := t.store.NearMatch(waiter.match)
+	if err != nil {
+		panic(err.Error())
+	}
 	var matches []Tuple
-	for entry := range t.tuples {
+	for _, entry := range stored {
 		if waiter.match.Match(entry.Tuple) {
 			matches = append(matches, entry.Tuple)
 			if waiter.actions&ActionTake != 0 {
-				delete(t.tuples, entry)
+				t.store.Delete(entry.ID)
 			}
 			if waiter.actions&ActionOne != 0 {
 				break
@@ -177,15 +186,8 @@ func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
 
 // Purge expired tuples and waiters.
 func (t *tupleSpaceImpl) purge() {
-	log.Fine("Purging tuples and waiters")
-	tuples := 0
+	log.Fine("Purging waiters")
 	now := time.Now()
-	for entry := range t.tuples {
-		if !entry.Timeout.IsZero() && entry.Timeout.Before(now) {
-			delete(t.tuples, entry)
-			tuples++
-		}
-	}
 	waiters := 0
 	for waiter := range t.waiters {
 		if !waiter.timeout.IsZero() && waiter.timeout.Before(now) {
@@ -194,7 +196,7 @@ func (t *tupleSpaceImpl) purge() {
 			waiters++
 		}
 	}
-	log.Fine("Purged %d tuples and %d waiters", tuples, waiters)
+	log.Fine("Purged %d waiters", waiters)
 }
 
 func (t *tupleSpaceImpl) Send(tuple Tuple, timeout time.Duration) error {

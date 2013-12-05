@@ -4,6 +4,7 @@ import (
 	"fmt"
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
+	"github.com/alecthomas/tuplespace/store/memory"
 	"github.com/codegangsta/martini"
 	"github.com/codegangsta/martini-contrib/binding"
 	"github.com/codegangsta/martini-contrib/render"
@@ -21,6 +22,7 @@ var (
 	writeTimeoutFlag = pflag.Duration("write_timeout", 30*time.Second, "HTTP server write timeout")
 	ncpuFlag         = pflag.Int("ncpu", runtime.NumCPU(), "number of cpus to use")
 	logLevelFlag     = pflag.String("log-level", "info", "log level (finest, fine, debug, info, warning, error, critical)")
+	storeFlag        = pflag.String("store", "memory", "set storage backend (memory)")
 
 	logLevels = map[string]log.Level{
 		"finest":   log.FINEST,
@@ -30,6 +32,10 @@ var (
 		"warning":  log.WARNING,
 		"error":    log.ERROR,
 		"critical": log.CRITICAL,
+	}
+
+	stores = map[string]func() tuplespace.TupleStore{
+		"memory": func() tuplespace.TupleStore { return memory.NewMemoryStore() },
 	}
 )
 
@@ -97,9 +103,7 @@ func takeOrRead(take bool, ts tuplespace.TupleSpace, w http.ResponseWriter,
 	}
 }
 
-func makeService() *martini.Martini {
-	ts := tuplespace.NewTupleSpace()
-
+func makeService(ts tuplespace.TupleSpace) *martini.Martini {
 	m := martini.New()
 	m.Use(martini.Recovery())
 	m.Use(martini.Logger())
@@ -138,9 +142,12 @@ func main() {
 		go func() { log.Error("%s", http.ListenAndServe("localhost:6060", nil)) }()
 	}
 
+	store := stores[*storeFlag]()
+	ts := tuplespace.NewTupleSpace(store)
+
 	srv := &http.Server{
 		Addr:         *bindFlag,
-		Handler:      makeService(),
+		Handler:      makeService(ts),
 		ReadTimeout:  *readTimeoutFlag,
 		WriteTimeout: *writeTimeoutFlag,
 	}
