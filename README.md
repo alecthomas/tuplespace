@@ -9,7 +9,10 @@ The tuple space uses [LevelDB](https://code.google.com/p/leveldb/) Go [bindings]
 - In-process tuple space implementation for Go (eg. `tuplespace.NewTupleSpace(store.NewMemoryStore())`)
 - A RESTful tuple space server:
 
-	curl -X POST -H "Content-Type: application/json" -d '{"tuples": [["cmd", "uname -a"]]}' -i http://localhost:2619/tuplespace/`
+	```bash
+	$ tuplespaced &
+	$ curl -X POST -H "Content-Type: application/json" -d '{"tuples": [["cmd", "uname -a"]]}' -i http://localhost:2619/tuplespace/`
+	```
 
 - Go client:
 
