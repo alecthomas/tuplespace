@@ -52,19 +52,41 @@ var (
 	CancelledReader = errors.New("cancelled reader")
 )
 
+// ReadOperationHandle provides asynchronous access to read results.
 type ReadOperationHandle interface {
 	Cancel()
 	Get() chan []Tuple
 	Error() chan error
 }
 
-// A TupleSpace provides a shared space for delivering and receiving tuples.
-type TupleSpace interface {
-	// Send tuples into the tuplespace, with an optional timeout.
-	Send(tuples []Tuple, timeout time.Duration) error
+// RawTupleSpace provides the fundamental operations on a tuple space.
+type RawTupleSpace interface {
+	// SendMany tuples into the tuplespace, with an optional timeout.
+	SendMany(tuples []Tuple, timeout time.Duration) error
 
 	// Raw read operation. Actions should be a bitfield of Action* constants.
+	//
+	// Generally used like so:
+	//
+	// 		handle := ts.ReadOperation([]Tuple{"cmd", nil}, 0, ActionTake|ActionOne)
+	// 		select {
+	// 			case tuples := <-handle.Get():
+	// 				...
+	// 			case err := <-handle.Error():
+	// 				...
+	// 		}
 	ReadOperation(match Tuple, timeout time.Duration, actions int) ReadOperationHandle
+
+	// Shutdown the tuplespace.
+	Shutdown() error
+}
+
+// TupleSpaceHelper provides convenience methods for a TupleSpace on top of
+// the raw operations provided by RawTupleSpace.
+type TupleSpaceHelper interface {
+	// Send a single tuple into the tuplespace, with an optional timeout.
+	// NOTE: SendMany() has much higher throughput than Send().
+	Send(tuple Tuple, timeout time.Duration) error
 
 	// Read a tuple from the tuplespace, with an optional timeout.
 	Read(match Tuple, timeout time.Duration) (Tuple, error)
@@ -77,10 +99,10 @@ type TupleSpace interface {
 
 	// Take (read and remove) all tuples from the tuplespace, with an optional timeout.
 	TakeAll(match Tuple, timeout time.Duration) ([]Tuple, error)
+}
 
-	// Shutdown the tuplespace.
-	Shutdown() error
-
-	// Statistics for the tuplespace.
-	Stats() TupleSpaceStats
+// A TupleSpace provides a shared space for delivering and receiving tuples.
+type TupleSpace interface {
+	RawTupleSpace
+	TupleSpaceHelper
 }

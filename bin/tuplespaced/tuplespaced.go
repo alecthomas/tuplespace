@@ -46,13 +46,13 @@ func fatalf(f string, args ...interface{}) {
 	os.Exit(1)
 }
 
-func Send(ts tuplespace.TupleSpace, req tuplespace.SendRequest, resp render.Render, errors binding.Errors) {
+func Send(ts tuplespace.RawTupleSpace, req tuplespace.SendRequest, resp render.Render, errors binding.Errors) {
 	if errors.Count() > 0 {
 		resp.JSON(http.StatusBadRequest, &tuplespace.ErrorResponse{Error: "invalid request structure"})
 		return
 	}
 
-	err := ts.Send(req.Tuples, req.Timeout)
+	err := ts.SendMany(req.Tuples, req.Timeout)
 
 	if err != nil {
 		resp.JSON(http.StatusInternalServerError, &tuplespace.ErrorResponse{Error: err.Error()})
@@ -61,15 +61,15 @@ func Send(ts tuplespace.TupleSpace, req tuplespace.SendRequest, resp render.Rend
 	}
 }
 
-func Read(ts tuplespace.TupleSpace, w http.ResponseWriter, req tuplespace.ReadRequest, resp render.Render, errors binding.Errors) {
+func Read(ts tuplespace.RawTupleSpace, w http.ResponseWriter, req tuplespace.ReadRequest, resp render.Render, errors binding.Errors) {
 	takeOrRead(false, ts, w, req, resp, errors)
 }
 
-func Take(ts tuplespace.TupleSpace, w http.ResponseWriter, req tuplespace.ReadRequest, resp render.Render, errors binding.Errors) {
+func Take(ts tuplespace.RawTupleSpace, w http.ResponseWriter, req tuplespace.ReadRequest, resp render.Render, errors binding.Errors) {
 	takeOrRead(true, ts, w, req, resp, errors)
 }
 
-func takeOrRead(take bool, ts tuplespace.TupleSpace, w http.ResponseWriter,
+func takeOrRead(take bool, ts tuplespace.RawTupleSpace, w http.ResponseWriter,
 	req tuplespace.ReadRequest, resp render.Render, errors binding.Errors) {
 	if errors.Count() > 0 {
 		resp.JSON(http.StatusBadRequest, &tuplespace.ErrorResponse{Error: "invalid request structure"})
@@ -110,7 +110,7 @@ func takeOrRead(take bool, ts tuplespace.TupleSpace, w http.ResponseWriter,
 	}
 }
 
-func makeService(ts tuplespace.TupleSpace, debug bool) *martini.Martini {
+func makeService(ts tuplespace.RawTupleSpace, debug bool) *martini.Martini {
 	m := martini.New()
 	m.Use(martini.Recovery())
 	if debug {
@@ -118,7 +118,7 @@ func makeService(ts tuplespace.TupleSpace, debug bool) *martini.Martini {
 	}
 	m.Use(render.Renderer("."))
 
-	m.MapTo(ts, (*tuplespace.TupleSpace)(nil))
+	m.MapTo(ts, (*tuplespace.RawTupleSpace)(nil))
 
 	r := martini.NewRouter()
 	r.Post("/tuplespace/", binding.Json(tuplespace.SendRequest{}), Send)

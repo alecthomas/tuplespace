@@ -17,23 +17,6 @@ class Timeout(Error):
     """Tuplespace operation timed out."""
 
 
-def _check_response(response, status_codes):
-    if response.headers['content-type'] != 'application/json':
-        raise Error('expected application/json response, got %s' % response.headers['content-type'])
-    if response.status_code == 504:
-        raise Timeout('tuplespace timeout')
-    response.data = json.loads(response.content)
-    if response.status_code not in status_codes:
-        raise Error('unexpected status code %d: %s' % (response.status_code, response.data.get('error', '?')))
-    return response
-
-
-def _timeout(timeout):
-    if timeout == 0:
-        return 0
-    return long(timeout * 1000000000.0)
-
-
 class TupleSpace(object):
     """Tuplespace client for https://github.com/wharf/tuplespace.
 
@@ -127,3 +110,20 @@ class TupleSpace(object):
 
     def _delete(self, path, data, status_codes):
         return self._req(requests.delete, path, data, status_codes)
+
+
+def _check_response(response, status_codes):
+    if response.headers['content-type'] != 'application/json':
+        raise Error('expected application/json response, got %s' % response.headers['content-type'])
+    if response.status_code == 504:
+        raise Timeout('tuplespace timeout')
+    response.data = json.loads(response.content)
+    if response.status_code not in status_codes:
+        raise Error('unexpected status code %d: %s' % (response.status_code, response.data.get('error', '?')))
+    return response
+
+
+def _timeout(timeout):
+    if timeout == 0:
+        return 0
+    return long(timeout * 1000000000.0)

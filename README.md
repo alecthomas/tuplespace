@@ -11,12 +11,21 @@ The tuple space uses [LevelDB](https://code.google.com/p/leveldb/) Go [bindings]
 
 		curl -X POST -H "Content-Type: application/json" -d '{"tuples": [["cmd", "uname -a"]]}' -i http://localhost:2619/tuplespace/`
 
+- Go client:
+
+		```go
+		ts, err := client.NewTupleSpaceClient("http://127.0.0.1:2169/tuplespace/")
+		ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, time.Minute)
+		```
+
 - Python client:
 
+		```python
 		>>> import tuplespace
 		>>> ts = tuplespace.TupleSpace()
 		>>> ts.take(('cmd', None))
 		('cmd', 'uname -a')
+		```
 
 ## Caveats
 

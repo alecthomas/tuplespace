@@ -28,15 +28,17 @@ func (c *clientReadOperationHandle) Error() chan error {
 }
 
 type tupleSpaceClient struct {
-	url    string
-	client *http.Client
+	URL    string
+	Client *http.Client
 }
 
+// NewTupleSpaceClient creates a new client for the service at url.
 func NewTupleSpaceClient(url string) tuplespace.TupleSpace {
-	return &tupleSpaceClient{
-		url:    url,
-		client: &http.Client{},
+	c := &tupleSpaceClient{
+		URL:    url,
+		Client: &http.Client{},
 	}
+	return tuplespace.NewTupleSpaceHelper(c)
 }
 
 func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) error {
@@ -44,14 +46,14 @@ func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) 
 	if err != nil {
 		return err
 	}
-	hreq, err := http.NewRequest(method, t.url, bytes.NewReader(reqBytes))
+	hreq, err := http.NewRequest(method, t.URL, bytes.NewReader(reqBytes))
 	if err != nil {
 		return err
 	}
 	hreq.Header["Accept"] = []string{"application/json"}
 	hreq.Header["Content-Type"] = []string{"application/json"}
 
-	hresp, err := t.client.Do(hreq)
+	hresp, err := t.Client.Do(hreq)
 	if hresp != nil && hresp.Body != nil {
 		defer hresp.Body.Close()
 	}
@@ -74,7 +76,7 @@ func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) 
 	return decoder.Decode(resp)
 }
 
-func (t *tupleSpaceClient) Send(tuples []tuplespace.Tuple, timeout time.Duration) error {
+func (t *tupleSpaceClient) SendMany(tuples []tuplespace.Tuple, timeout time.Duration) error {
 	req := &tuplespace.SendRequest{
 		Tuples:  tuples,
 		Timeout: timeout,
@@ -108,52 +110,6 @@ func (t *tupleSpaceClient) ReadOperation(match tuplespace.Tuple, timeout time.Du
 	return handle
 }
 
-func (t *tupleSpaceClient) Read(match tuplespace.Tuple, timeout time.Duration) (r tuplespace.Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, tuplespace.ActionOne)
-	select {
-	case err = <-waiter.Error():
-		return
-	case matches := <-waiter.Get():
-		r = matches[0]
-		return
-	}
-}
-
-func (t *tupleSpaceClient) ReadAll(match tuplespace.Tuple, timeout time.Duration) (r []tuplespace.Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, 0)
-	select {
-	case err = <-waiter.Error():
-		return
-	case r = <-waiter.Get():
-		return
-	}
-}
-
-func (t *tupleSpaceClient) Take(match tuplespace.Tuple, timeout time.Duration) (r tuplespace.Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, tuplespace.ActionOne|tuplespace.ActionTake)
-	select {
-	case err = <-waiter.Error():
-		return
-	case matches := <-waiter.Get():
-		r = matches[0]
-		return
-	}
-}
-
-func (t *tupleSpaceClient) TakeAll(match tuplespace.Tuple, timeout time.Duration) (r []tuplespace.Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, tuplespace.ActionTake)
-	select {
-	case err = <-waiter.Error():
-		return
-	case r = <-waiter.Get():
-		return
-	}
-}
-
 func (t *tupleSpaceClient) Shutdown() error {
 	return nil
-}
-
-func (t *tupleSpaceClient) Stats() tuplespace.TupleSpaceStats {
-	return tuplespace.TupleSpaceStats{}
 }

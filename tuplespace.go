@@ -120,7 +120,7 @@ type tupleSpaceImpl struct {
 }
 
 // NewTupleSpace creates a new tuple store using the given storage backend.
-func NewTupleSpace(store TupleStore) TupleSpace {
+func NewTupleSpace(store TupleStore) RawTupleSpace {
 	ts := &tupleSpaceImpl{
 		waiters:      make(map[*tupleWaiter]interface{}),
 		in:           make(chan *tupleSend, 16),
@@ -246,7 +246,7 @@ func (t *tupleSpaceImpl) purge() {
 	log.Fine("Purged %d waiters", waiters)
 }
 
-func (t *tupleSpaceImpl) Send(tuples []Tuple, timeout time.Duration) error {
+func (t *tupleSpaceImpl) SendMany(tuples []Tuple, timeout time.Duration) error {
 	log.Debug("Send(%s, %s)", tuples, timeout)
 	var expires time.Time
 	if timeout != 0 {
@@ -262,48 +262,6 @@ func (t *tupleSpaceImpl) ReadOperation(match Tuple, timeout time.Duration, actio
 	log.Debug("ReadOperation(%s)", waiter)
 	t.waitersIn <- waiter
 	return waiter
-}
-
-func (t *tupleSpaceImpl) Read(match Tuple, timeout time.Duration) (r Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, ActionOne)
-	select {
-	case err = <-waiter.Error():
-		return
-	case matches := <-waiter.Get():
-		r = matches[0]
-		return
-	}
-}
-
-func (t *tupleSpaceImpl) ReadAll(match Tuple, timeout time.Duration) (r []Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, 0)
-	select {
-	case err = <-waiter.Error():
-		return
-	case r = <-waiter.Get():
-		return
-	}
-}
-
-func (t *tupleSpaceImpl) Take(match Tuple, timeout time.Duration) (r Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, ActionOne|ActionTake)
-	select {
-	case err = <-waiter.Error():
-		return
-	case matches := <-waiter.Get():
-		r = matches[0]
-		return
-	}
-}
-
-func (t *tupleSpaceImpl) TakeAll(match Tuple, timeout time.Duration) (r []Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, ActionTake)
-	select {
-	case err = <-waiter.Error():
-		return
-	case r = <-waiter.Get():
-		return
-	}
 }
 
 func (t *tupleSpaceImpl) Shutdown() error {

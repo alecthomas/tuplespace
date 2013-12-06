@@ -75,7 +75,7 @@ Examples:
 			tuples[i] = tuple
 		}
 		log.Info("Sending %d tuples", *copiesFlag)
-		err := c.Send(tuples, timeout)
+		err := c.SendMany(tuples, timeout)
 		if err != nil {
 			fatalf("failed to send tuples: %s", err)
 		}
