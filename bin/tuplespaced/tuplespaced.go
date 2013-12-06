@@ -22,7 +22,7 @@ var (
 	writeTimeoutFlag = pflag.Duration("write_timeout", 30*time.Second, "HTTP server write timeout")
 	ncpuFlag         = pflag.Int("ncpu", runtime.NumCPU(), "number of cpus to use")
 	logLevelFlag     = pflag.String("log-level", "info", "log level (finest, fine, debug, info, warning, error, critical)")
-	storeFlag        = pflag.String("store", "memory", "set storage backend (memory, leveldb)")
+	storeFlag        = pflag.String("store", "leveldb", "set storage backend (memory, leveldb)")
 	dbFlag           = pflag.String("db", "tuplestore.db", "path to database")
 
 	logLevels = map[string]log.Level{
@@ -52,7 +52,7 @@ func Send(ts tuplespace.TupleSpace, req tuplespace.SendRequest, resp render.Rend
 		return
 	}
 
-	err := ts.Send(req.Tuple, req.Timeout)
+	err := ts.Send(req.Tuples, req.Timeout)
 
 	if err != nil {
 		resp.JSON(http.StatusInternalServerError, &tuplespace.ErrorResponse{Error: err.Error()})

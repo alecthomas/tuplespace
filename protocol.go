@@ -9,7 +9,7 @@ type ErrorResponse struct {
 }
 
 type SendRequest struct {
-	Tuple   Tuple         `json:"tuple" required`
+	Tuples  []Tuple       `json:"tuples" required`
 	Timeout time.Duration `json:"timeout"`
 }
 

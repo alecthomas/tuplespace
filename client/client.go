@@ -74,9 +74,9 @@ func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) 
 	return decoder.Decode(resp)
 }
 
-func (t *tupleSpaceClient) Send(tuple tuplespace.Tuple, timeout time.Duration) error {
+func (t *tupleSpaceClient) Send(tuples []tuplespace.Tuple, timeout time.Duration) error {
 	req := &tuplespace.SendRequest{
-		Tuple:   tuple,
+		Tuples:  tuples,
 		Timeout: timeout,
 	}
 	resp := &tuplespace.SendResponse{}

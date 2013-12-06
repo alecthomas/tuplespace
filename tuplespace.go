@@ -1,3 +1,39 @@
+// Package tuplespace provides implementations of a Tuple Space for Go.
+//
+// It provides both an in-process asynchronous tuplespace type (use
+// NewTupleSpace) and a RESTful server.
+//
+// Two storage backends are currently available: leveldb and in- memory.
+//
+// Install and the server:
+//
+// 		$ go get github.com/alecthomas/tuplespace/bin/tuplespaced
+// 		$ tuplespaced --log-level=info
+// 		[22:26:27 EST 2013/12/05] [INFO] Starting server on http://127.0.0.1:2619/tuplespace/
+//    [22:26:27 EST 2013/12/05] [INFO] Compacting database
+//
+// You can test the tuplespace service with a basic command-line client:
+//
+//		$ go get github.com/alecthomas/tuplespace/bin/tuplespace
+//
+// Send a bunch of tuples:
+//
+//		$ tuplespace --copies=1000 send '["cmd", "uname -a"]'
+//
+// Take all tuples:
+//
+//    $ time tuplespace takeall '["cmd", null]' | wc
+//
+// Python bindings are also available:
+//
+// 		$ pip install tuplespace
+// 		$ python
+// 		>>> import tuplespace
+// 		>>> ts = tuplespace.TupleSpace()
+// 		>>> ts.send(('cmd', 'uname -a'))
+// 		>>> ts.take(('cmd', None))
+//    ('cmd', 'uname -a')
+//
 package tuplespace
 
 import (
@@ -18,6 +54,11 @@ type tupleWaiter struct {
 	// true if tuples were found, false otherwise
 	result chan error
 	cancel chan *tupleWaiter
+}
+
+type tupleSend struct {
+	tuples  []Tuple
+	timeout time.Time
 }
 
 func (t *tupleWaiter) String() string {
@@ -69,7 +110,7 @@ func newWaiter(cancel chan *tupleWaiter, match Tuple, timeout time.Duration, act
 type tupleSpaceImpl struct {
 	store        TupleStore
 	waiters      map[*tupleWaiter]interface{}
-	in           chan *TupleEntry
+	in           chan *tupleSend
 	waitersIn    chan *tupleWaiter
 	cancel       chan *tupleWaiter
 	shutdown     chan bool
@@ -82,7 +123,7 @@ type tupleSpaceImpl struct {
 func NewTupleSpace(store TupleStore) TupleSpace {
 	ts := &tupleSpaceImpl{
 		waiters:      make(map[*tupleWaiter]interface{}),
-		in:           make(chan *TupleEntry, 16),
+		in:           make(chan *tupleSend, 16),
 		waitersIn:    make(chan *tupleWaiter, 16),
 		cancel:       make(chan *tupleWaiter, 16),
 		shutdown:     make(chan bool, 1),
@@ -99,8 +140,8 @@ func (t *tupleSpaceImpl) run() {
 	purgeTimer := time.Tick(time.Millisecond * 250)
 	for {
 		select {
-		case entry := <-t.in:
-			t.processNewEntry(entry)
+		case send := <-t.in:
+			t.processNewEntries(send)
 		case waiter := <-t.waitersIn:
 			t.processNewWaiter(waiter)
 		case waiter := <-t.cancel:
@@ -139,20 +180,25 @@ func (t *tupleSpaceImpl) updateStats() {
 	t.statsUpdated.Broadcast()
 }
 
-func (t *tupleSpaceImpl) processNewEntry(entry *TupleEntry) {
+func (t *tupleSpaceImpl) processNewEntries(entries *tupleSend) {
 	for waiter := range t.waiters {
-		if waiter.match.Match(entry.Tuple) {
-			delete(t.waiters, waiter)
-
-			waiter.matches <- []Tuple{entry.Tuple}
-
-			if waiter.actions&ActionTake != 0 {
-				return
+		matches := []Tuple{}
+		for i, tuple := range entries.tuples {
+			if tuple != nil && waiter.match.Match(tuple) {
+				matches = append(matches, tuple)
+				matches[i] = nil
+				if waiter.actions&ActionTake != 0 {
+					return
+				}
 			}
+		}
+		if len(matches) > 0 {
+			delete(t.waiters, waiter)
+			waiter.matches <- matches
 		}
 	}
 
-	err := t.store.Put(entry.Tuple, entry.Timeout)
+	err := t.store.Put(entries.tuples, entries.timeout)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -200,13 +246,13 @@ func (t *tupleSpaceImpl) purge() {
 	log.Fine("Purged %d waiters", waiters)
 }
 
-func (t *tupleSpaceImpl) Send(tuple Tuple, timeout time.Duration) error {
-	log.Debug("Send(%s, %s)", tuple, timeout)
+func (t *tupleSpaceImpl) Send(tuples []Tuple, timeout time.Duration) error {
+	log.Debug("Send(%s, %s)", tuples, timeout)
 	var expires time.Time
 	if timeout != 0 {
 		expires = time.Now().Add(timeout)
 	}
-	entry := &TupleEntry{Tuple: tuple, Timeout: expires}
+	entry := &tupleSend{tuples: tuples, timeout: expires}
 	t.in <- entry
 	return nil
 }

@@ -20,13 +20,15 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (m *MemoryStore) Put(tuple tuplespace.Tuple, timeout time.Time) error {
-	entry := &tuplespace.TupleEntry{
-		ID:      atomic.AddUint64(&m.id, 1),
-		Tuple:   tuple,
-		Timeout: timeout,
+func (m *MemoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+	for _, tuple := range tuples {
+		entry := &tuplespace.TupleEntry{
+			ID:      atomic.AddUint64(&m.id, 1),
+			Tuple:   tuple,
+			Timeout: timeout,
+		}
+		m.tuples[entry.ID] = entry
 	}
-	m.tuples[entry.ID] = entry
 	return nil
 }
 

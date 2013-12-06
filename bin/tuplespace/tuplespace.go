@@ -9,15 +9,13 @@ import (
 	"github.com/ogier/pflag"
 	"os"
 	"runtime"
-	"sync"
 	"time"
 )
 
 var (
-	serverFlag      = pflag.String("server", "http://127.0.0.1:2619/tuplespace/", "tuplespace server address")
-	timeoutFlag     = pflag.Duration("timeout", time.Second*60, "tuplespace operation timeout")
-	copiesFlag      = pflag.Int("copies", 1, "number of copies of the tuple to send")
-	concurrencyFlag = pflag.Int("concurrency", 64, "number of parallel clients to use")
+	serverFlag  = pflag.String("server", "http://127.0.0.1:2619/tuplespace/", "tuplespace server address")
+	timeoutFlag = pflag.Duration("timeout", time.Second*60, "tuplespace operation timeout")
+	copiesFlag  = pflag.Int("copies", 1, "number of copies of the tuple to send")
 )
 
 func fatalf(f string, args ...interface{}) {
@@ -72,26 +70,15 @@ Examples:
 	switch command {
 	case "send":
 		tuple := parseTuple(pflag.Arg(1))
-		log.Info("Sending %d tuples with concurrency of %d", *copiesFlag, *concurrencyFlag)
-		requests := make(chan tuplespace.Tuple, *concurrencyFlag)
-		group := &sync.WaitGroup{}
-		for i := 0; i < 32; i++ {
-			group.Add(1)
-			go func() {
-				for tuple := range requests {
-					err := c.Send(tuple, timeout)
-					if err != nil {
-						fatalf("failed to send tuple: %s", err)
-					}
-				}
-				group.Done()
-			}()
-		}
+		tuples := make([]tuplespace.Tuple, *copiesFlag)
 		for i := 0; i < *copiesFlag; i++ {
-			requests <- tuple
+			tuples[i] = tuple
 		}
-		close(requests)
-		group.Wait()
+		log.Info("Sending %d tuples", *copiesFlag)
+		err := c.Send(tuples, timeout)
+		if err != nil {
+			fatalf("failed to send tuples: %s", err)
+		}
 
 	case "read", "take":
 		match := parseTuple(pflag.Arg(1))

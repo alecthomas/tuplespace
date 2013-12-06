@@ -22,7 +22,7 @@ type LevelDBTupleStore struct {
 	woptions *levigo.WriteOptions
 }
 
-func NewLevelDBTupleStore(path string) (*LevelDBTupleStore, error) {
+func NewLevelDBTupleStore(path string) (tuplespace.TupleStore, error) {
 	options := levigo.NewOptions()
 	cache := levigo.NewLRUCache(1 << 20)
 	env := levigo.NewDefaultEnv()
@@ -58,29 +58,33 @@ func NewLevelDBTupleStore(path string) (*LevelDBTupleStore, error) {
 	if len(b) > 0 {
 		l.id = binary.LittleEndian.Uint64(b)
 	}
-	return l, nil
+	return NewLockingMiddleware(l), nil
 }
 
-func (l *LevelDBTupleStore) Put(tuple tuplespace.Tuple, timeout time.Time) error {
-	// Update ID
-	l.id++
-	entryKey, key := keyForID(l.id)
-
-	// Serialize value
-	entry := &tuplespace.TupleEntry{
-		ID:      l.id,
-		Tuple:   tuple,
-		Timeout: timeout,
-	}
-	value, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-
-	// Write update
+func (l *LevelDBTupleStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	wb := levigo.NewWriteBatch()
+	var entryKey, key []byte
+
+	for _, tuple := range tuples {
+		// Update ID
+		l.id++
+		entryKey, key = keyForID(l.id)
+
+		// Serialize value
+		entry := &tuplespace.TupleEntry{
+			ID:      l.id,
+			Tuple:   tuple,
+			Timeout: timeout,
+		}
+		value, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		// Write update
+		wb.Put(entryKey, value)
+	}
+
 	wb.Put(idKey, key)
-	wb.Put(entryKey, value)
 	l.db.Write(l.woptions, wb)
 	return nil
 }
@@ -96,6 +100,9 @@ func (l *LevelDBTupleStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEn
 	it := l.db.NewIterator(l.roptions)
 	it.Seek(entryPrefix)
 	for it.Seek(entryPrefix); it.Valid(); it.Next() {
+		// TODO: Figure out whether iteration from a seek should be contiguous
+		// with respect to the prefix. It seemed like it wasn't, but that seems
+		// weird.
 		if bytes.Compare(entryPrefix, it.Key()[:len(entryPrefix)]) != 0 {
 			continue
 		}
@@ -104,7 +111,7 @@ func (l *LevelDBTupleStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEn
 		if err != nil {
 			return nil, err
 		}
-		if now.After(entry.Timeout) {
+		if !entry.Timeout.IsZero() && now.After(entry.Timeout) {
 			deletes.Delete(it.Key())
 			deleted++
 		} else {

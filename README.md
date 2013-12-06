@@ -2,10 +2,18 @@
 
 This is an implementation of a [tuple space](http://www.mcs.anl.gov/~itf/dbpp/text/node44.html) as a RESTful HTTP service.
 
+Tuples are persisted using [LevelDB](https://code.google.com/p/leveldb/) Go [bindings](https://github.com/jmhodges/levigo). There is also a pure in-memory store selectable via `tuplespaced --store=memory`.
+
 ## Caveats
 
-- Currently in-memory only.
 - No replication.
+- No reservations (transactions).
+
+## Plans
+
+- Implement fault tolerance (possibly using Raft).
+- Implement reservations.
+- Implement
 
 ## Glossary
 
@@ -16,9 +24,9 @@ This is an implementation of a [tuple space](http://www.mcs.anl.gov/~itf/dbpp/te
 
 The following extended tuplespace operations are supported:
 
-### `Send(tuple, timeout)`
+### `Send(tuples, timeout)`
 
-Send a tuple into the tuplespace, with an optional timeout.
+Send tuples into the tuplespace, with an optional timeout.
 
 ### `Take(match, timeout) -> Tuple`
 
@@ -102,7 +110,7 @@ If a non-2XX response is returned the response will be JSON in the following for
 
 ```python
 {
-	"tuple": <tuple>,            # The tuple to insert.
+	"tuples": [<tuple>],         # The tuples to insert.
 	"timeout": <nanos>           # 0 (or omitted) means no timeout
 }
 ```

@@ -16,8 +16,8 @@ type TupleEntry struct {
 // A TupleStore handles efficient storage and retrieval of tuples.
 // The store MUST purge expired entries.
 type TupleStore interface {
-	// Put a tuple into the store.
-	Put(tuple Tuple, timeout time.Time) error
+	// Put tuples into the store.
+	Put(tuple []Tuple, timeout time.Time) error
 	// Match retrieves tuples from the store that match "match". This MUST NOT
 	// return expired tuples.
 	Match(match Tuple) ([]*TupleEntry, error)
@@ -60,8 +60,8 @@ type ReadOperationHandle interface {
 
 // A TupleSpace provides a shared space for delivering and receiving tuples.
 type TupleSpace interface {
-	// Send a tuple into the tuplespace, with an optional timeout.
-	Send(tuple Tuple, timeout time.Duration) error
+	// Send tuples into the tuplespace, with an optional timeout.
+	Send(tuples []Tuple, timeout time.Duration) error
 
 	// Raw read operation. Actions should be a bitfield of Action* constants.
 	ReadOperation(match Tuple, timeout time.Duration, actions int) ReadOperationHandle
