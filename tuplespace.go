@@ -147,8 +147,8 @@ type tupleSpaceImpl struct {
 	statsUpdated *sync.Cond
 }
 
-// NewTupleSpace creates a new tuple store using the given storage backend.
-func NewTupleSpace(store TupleStore) RawTupleSpace {
+// NewRawTupleSpace creates a new tuple store using the given storage backend.
+func NewRawTupleSpace(store TupleStore) RawTupleSpace {
 	ts := &tupleSpaceImpl{
 		waiters:      make(map[*tupleWaiter]interface{}),
 		in:           make(chan *tupleSend, 16),

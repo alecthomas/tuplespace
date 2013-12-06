@@ -8,6 +8,11 @@ type tupleSpaceHelper struct {
 	RawTupleSpace
 }
 
+// NewTupleSpace creates a new tuple store using the given storage backend.
+func NewTupleSpace(store TupleStore) TupleSpace {
+	return NewTupleSpaceHelper(NewRawTupleSpace(store))
+}
+
 // NewTupleSpaceHelper implements convenience functions on top of a
 // RawTupleSpace implementation.
 func NewTupleSpaceHelper(space RawTupleSpace) TupleSpace {

@@ -6,29 +6,30 @@ The tuple space uses [LevelDB](https://code.google.com/p/leveldb/) Go [bindings]
 
 ## Features
 
-- In-process tuple space implementation for Go (eg. `tuplespace.NewTupleSpace(store.NewMemoryStore())`)
-- A RESTful tuple space server:
+Includes an in-process tuple space implementation for Go (eg. `tuplespace.NewTupleSpace(store.NewMemoryStore())`).
 
-	```bash
-	$ tuplespaced &
-	$ curl -X POST -H "Content-Type: application/json" -d '{"tuples": [["cmd", "uname -a"]]}' -i http://localhost:2619/tuplespace/`
-	```
+A RESTful tuple space server:
 
-- Go client:
+```bash
+$ tuplespaced &
+$ curl -X POST -H "Content-Type: application/json" -d '{"tuples": [["cmd", "uname -a"]]}' -i http://localhost:2619/tuplespace/`
+```
 
-	```go
-	ts, err := client.NewTupleSpaceClient("http://127.0.0.1:2169/tuplespace/")
-	ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, time.Minute)
-	```
+Go client:
 
-- Python client:
+```go
+ts, err := client.NewTupleSpaceClient("http://127.0.0.1:2169/tuplespace/")
+ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, time.Minute)
+```
 
-	```python
-	>>> import tuplespace
-	>>> ts = tuplespace.TupleSpace()
-	>>> ts.take(('cmd', None))
-	('cmd', 'uname -a')
-	```
+Python client:
+
+```python
+>>> import tuplespace
+>>> ts = tuplespace.TupleSpace()
+>>> ts.take(('cmd', None))
+('cmd', 'uname -a')
+```
 
 ## Caveats
 
