@@ -31,6 +31,22 @@ Python client:
 ('cmd', 'uname -a')
 ```
 
+## Performance
+
+On a 2012 MacBook Air 11".
+
+`MemoryStore`:
+
+- `SendMany` 1M - 306K tps
+- `ReadAll` 1M - 116K tps
+- `TakeAll` 1M - 114K tps
+
+`LevelDBStore`:
+
+- `SendMany` 1M - 307K tps
+- `ReadAll` 1M - 61K tps
+- `TakeAll` 1M - 33K tps
+
 ## Caveats
 
 - No replication.

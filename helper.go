@@ -5,7 +5,7 @@ import (
 )
 
 type tupleSpaceHelper struct {
-	RawTupleSpace
+	ts RawTupleSpace
 }
 
 // NewTupleSpace creates a new tuple store using the given storage backend.
@@ -20,23 +20,23 @@ func NewTupleSpaceHelper(space RawTupleSpace) TupleSpace {
 }
 
 func (t *tupleSpaceHelper) SendMany(tuples []Tuple, timeout time.Duration) error {
-	return t.SendMany(tuples, timeout)
+	return t.ts.SendMany(tuples, timeout)
 }
 
 func (t *tupleSpaceHelper) ReadOperation(match Tuple, timeout time.Duration, actions int) ReadOperationHandle {
-	return t.ReadOperation(match, timeout, actions)
+	return t.ts.ReadOperation(match, timeout, actions)
 }
 
 func (t *tupleSpaceHelper) Shutdown() error {
-	return t.Shutdown()
+	return t.ts.Shutdown()
 }
 
 func (t *tupleSpaceHelper) Send(tuple Tuple, timeout time.Duration) error {
-	return t.SendMany([]Tuple{tuple}, timeout)
+	return t.ts.SendMany([]Tuple{tuple}, timeout)
 }
 
 func (t *tupleSpaceHelper) Read(match Tuple, timeout time.Duration) (r Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, ActionOne)
+	waiter := t.ts.ReadOperation(match, timeout, ActionOne)
 	select {
 	case err = <-waiter.Error():
 		return
@@ -47,7 +47,7 @@ func (t *tupleSpaceHelper) Read(match Tuple, timeout time.Duration) (r Tuple, er
 }
 
 func (t *tupleSpaceHelper) ReadAll(match Tuple, timeout time.Duration) (r []Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, 0)
+	waiter := t.ts.ReadOperation(match, timeout, 0)
 	select {
 	case err = <-waiter.Error():
 		return
@@ -57,7 +57,7 @@ func (t *tupleSpaceHelper) ReadAll(match Tuple, timeout time.Duration) (r []Tupl
 }
 
 func (t *tupleSpaceHelper) Take(match Tuple, timeout time.Duration) (r Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, ActionOne|ActionTake)
+	waiter := t.ts.ReadOperation(match, timeout, ActionOne|ActionTake)
 	select {
 	case err = <-waiter.Error():
 		return
@@ -68,7 +68,7 @@ func (t *tupleSpaceHelper) Take(match Tuple, timeout time.Duration) (r Tuple, er
 }
 
 func (t *tupleSpaceHelper) TakeAll(match Tuple, timeout time.Duration) (r []Tuple, err error) {
-	waiter := t.ReadOperation(match, timeout, ActionTake)
+	waiter := t.ts.ReadOperation(match, timeout, ActionTake)
 	select {
 	case err = <-waiter.Error():
 		return

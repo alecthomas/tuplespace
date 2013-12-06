@@ -37,7 +37,7 @@ var (
 
 	stores = map[string]func() (tuplespace.TupleStore, error){
 		"memory":  func() (tuplespace.TupleStore, error) { return store.NewMemoryStore(), nil },
-		"leveldb": func() (tuplespace.TupleStore, error) { return store.NewLevelDBTupleStore(*dbFlag) },
+		"leveldb": func() (tuplespace.TupleStore, error) { return store.NewLevelDBStore(*dbFlag) },
 	}
 )
 

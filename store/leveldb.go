@@ -15,14 +15,14 @@ var (
 	entryPrefix = []byte("e:")
 )
 
-type LevelDBTupleStore struct {
+type LevelDBStore struct {
 	id       uint64
 	db       *levigo.DB
 	roptions *levigo.ReadOptions
 	woptions *levigo.WriteOptions
 }
 
-func NewLevelDBTupleStore(path string) (tuplespace.TupleStore, error) {
+func NewLevelDBStore(path string) (tuplespace.TupleStore, error) {
 	options := levigo.NewOptions()
 	cache := levigo.NewLRUCache(1 << 20)
 	env := levigo.NewDefaultEnv()
@@ -50,7 +50,7 @@ func NewLevelDBTupleStore(path string) (tuplespace.TupleStore, error) {
 		return nil, err
 	}
 
-	l := &LevelDBTupleStore{
+	l := &LevelDBStore{
 		db:       db,
 		roptions: roptions,
 		woptions: woptions,
@@ -61,7 +61,7 @@ func NewLevelDBTupleStore(path string) (tuplespace.TupleStore, error) {
 	return NewLockingMiddleware(l), nil
 }
 
-func (l *LevelDBTupleStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (l *LevelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	wb := levigo.NewWriteBatch()
 	var entryKey, key []byte
 
@@ -89,7 +89,7 @@ func (l *LevelDBTupleStore) Put(tuples []tuplespace.Tuple, timeout time.Time) er
 	return nil
 }
 
-func (l *LevelDBTupleStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, error) {
+func (l *LevelDBStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, error) {
 	// Batch delete all expired entries.
 	deletes := levigo.NewWriteBatch()
 	deleted := 0
@@ -122,18 +122,18 @@ func (l *LevelDBTupleStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEn
 	}
 	if deleted > 0 {
 		l.db.Write(l.woptions, deletes)
-		log.Debug("Purged %d expired tuples from LevelDBTupleStore", deleted)
+		log.Debug("Purged %d expired tuples from LevelDBStore", deleted)
 	}
 	return matches, nil
 }
 
-func (l *LevelDBTupleStore) Delete(id uint64) error {
+func (l *LevelDBStore) Delete(id uint64) error {
 	key, _ := keyForID(id)
 	l.db.Delete(l.woptions, key)
 	return nil
 }
 
-func (l *LevelDBTupleStore) Shutdown() {
+func (l *LevelDBStore) Shutdown() {
 	l.db.Close()
 }
 
