@@ -14,7 +14,9 @@ type TupleEntry struct {
 }
 
 // A TupleStore handles efficient storage and retrieval of tuples.
-// The store MUST purge expired entries.
+//
+// - Implementations MUST purge expired entries.
+// - Implementations MUST be concurrency safe.
 type TupleStore interface {
 	// Put tuples into the store.
 	Put(tuple []Tuple, timeout time.Time) error
@@ -22,9 +24,11 @@ type TupleStore interface {
 	// return expired tuples.
 	Match(match Tuple) ([]*TupleEntry, error)
 	// Delete an entry in the store. "id" is TupleEntry.ID.
-	Delete(id uint64) error
+	Delete(ids []uint64) error
 	// Shutdown the store.
 	Shutdown()
+	// Update statistics.
+	UpdateStats(stats *TupleSpaceStats)
 }
 
 // TupleSpaceStats contains statistics on the tuplespace.
@@ -79,6 +83,9 @@ type RawTupleSpace interface {
 
 	// Shutdown the tuplespace.
 	Shutdown() error
+
+	// Stats returns statistics on the state of the TupleSpace.
+	Stats() TupleSpaceStats
 }
 
 // TupleSpaceHelper provides convenience methods for a TupleSpace on top of

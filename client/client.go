@@ -113,3 +113,7 @@ func (t *tupleSpaceClient) ReadOperation(match tuplespace.Tuple, timeout time.Du
 func (t *tupleSpaceClient) Shutdown() error {
 	return nil
 }
+
+func (t *tupleSpaceClient) Stats() tuplespace.TupleSpaceStats {
+	return tuplespace.TupleSpaceStats{}
+}

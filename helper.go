@@ -31,6 +31,10 @@ func (t *tupleSpaceHelper) Shutdown() error {
 	return t.ts.Shutdown()
 }
 
+func (t *tupleSpaceHelper) Stats() TupleSpaceStats {
+	return t.ts.Stats()
+}
+
 func (t *tupleSpaceHelper) Send(tuple Tuple, timeout time.Duration) error {
 	return t.ts.SendMany([]Tuple{tuple}, timeout)
 }

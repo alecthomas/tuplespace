@@ -7,28 +7,31 @@ import (
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
 	"github.com/jmhodges/levigo"
+	"sync/atomic"
 	"time"
 )
 
 var (
-	idKey       = []byte("idcounter")
 	entryPrefix = []byte("e:")
 )
 
-type LevelDBStore struct {
-	id       uint64
-	db       *levigo.DB
-	roptions *levigo.ReadOptions
-	woptions *levigo.WriteOptions
+type levelDBStore struct {
+	id         uint64 // Only updated via atomic ops
+	tupleCount int64  // Only updated via atomic ops
+	db         *levigo.DB
+	roptions   *levigo.ReadOptions
+	woptions   *levigo.WriteOptions
 }
 
+// NewLevelDBStore creates a new TupleStore backed by LevelDB.
 func NewLevelDBStore(path string) (tuplespace.TupleStore, error) {
 	options := levigo.NewOptions()
-	cache := levigo.NewLRUCache(1 << 20)
-	env := levigo.NewDefaultEnv()
-	options.SetCache(cache)
-	options.SetEnv(env)
+	options.SetEnv(levigo.NewDefaultEnv())
 	options.SetCreateIfMissing(true)
+	options.SetFilterPolicy(levigo.NewBloomFilter(16))
+	options.SetCache(levigo.NewLRUCache(1 << 20))
+	options.SetMaxOpenFiles(500)
+	options.SetWriteBufferSize(62914560)
 
 	roptions := levigo.NewReadOptions()
 	roptions.SetVerifyChecksums(true)
@@ -41,38 +44,48 @@ func NewLevelDBStore(path string) (tuplespace.TupleStore, error) {
 		return nil, err
 	}
 
-	log.Info("Compacting database")
+	log.Info("LevelDBStore: compacting")
 	db.CompactRange(levigo.Range{Start: nil, Limit: nil})
 
-	b, err := db.Get(roptions, idKey)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	l := &LevelDBStore{
+	l := &levelDBStore{
 		db:       db,
 		roptions: roptions,
 		woptions: woptions,
 	}
-	if len(b) > 0 {
-		l.id = binary.LittleEndian.Uint64(b)
-	}
-	return NewLockingMiddleware(l), nil
+
+	log.Info("LevelDBStore: loading state")
+	l.initState()
+	log.Info("LevelDBStore: ready, %d tuples, last ID was %d",
+		atomic.LoadInt64(&l.tupleCount), atomic.LoadUint64(&l.id))
+	return l, nil
 }
 
-func (l *LevelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (l *levelDBStore) initState() {
+	it := l.db.NewIterator(l.roptions)
+	for it.Seek(entryPrefix); it.Valid(); it.Next() {
+		if bytes.Compare(entryPrefix, it.Key()[:len(entryPrefix)]) != 0 {
+			break
+		}
+		l.tupleCount++
+		id := idFromKey(it.Key())
+		if id > l.id {
+			l.id = id
+		}
+	}
+}
+
+func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	wb := levigo.NewWriteBatch()
-	var entryKey, key []byte
+	var entryKey []byte
 
 	for _, tuple := range tuples {
 		// Update ID
-		l.id++
-		entryKey, key = keyForID(l.id)
+		id := atomic.AddUint64(&l.id, 1)
+		entryKey = keyForID(id)
 
 		// Serialize value
 		entry := &tuplespace.TupleEntry{
-			ID:      l.id,
+			ID:      id,
 			Tuple:   tuple,
 			Timeout: timeout,
 		}
@@ -82,14 +95,14 @@ func (l *LevelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 		}
 		// Write update
 		wb.Put(entryKey, value)
+		atomic.AddInt64(&l.tupleCount, 1)
 	}
 
-	wb.Put(idKey, key)
 	l.db.Write(l.woptions, wb)
 	return nil
 }
 
-func (l *LevelDBStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, error) {
+func (l *levelDBStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, error) {
 	// Batch delete all expired entries.
 	deletes := levigo.NewWriteBatch()
 	deleted := 0
@@ -98,13 +111,9 @@ func (l *LevelDBStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, 
 	matches := []*tuplespace.TupleEntry{}
 
 	it := l.db.NewIterator(l.roptions)
-	it.Seek(entryPrefix)
 	for it.Seek(entryPrefix); it.Valid(); it.Next() {
-		// TODO: Figure out whether iteration from a seek should be contiguous
-		// with respect to the prefix. It seemed like it wasn't, but that seems
-		// weird.
 		if bytes.Compare(entryPrefix, it.Key()[:len(entryPrefix)]) != 0 {
-			continue
+			break
 		}
 		entry := &tuplespace.TupleEntry{}
 		err := json.Unmarshal(it.Value(), entry)
@@ -121,26 +130,40 @@ func (l *LevelDBStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, 
 		}
 	}
 	if deleted > 0 {
+		atomic.AddInt64(&l.tupleCount, -1)
 		l.db.Write(l.woptions, deletes)
-		log.Debug("Purged %d expired tuples from LevelDBStore", deleted)
+		log.Debug("Purged %d expired tuples from levelDBStore", deleted)
 	}
 	return matches, nil
 }
 
-func (l *LevelDBStore) Delete(id uint64) error {
-	key, _ := keyForID(id)
-	l.db.Delete(l.woptions, key)
+func (l *levelDBStore) Delete(ids []uint64) error {
+	atomic.AddInt64(&l.tupleCount, -int64(len(ids)))
+	deletes := levigo.NewWriteBatch()
+	for _, id := range ids {
+		key := keyForID(id)
+		deletes.Delete(key)
+	}
+	l.db.Write(l.woptions, deletes)
 	return nil
 }
 
-func (l *LevelDBStore) Shutdown() {
+func (l *levelDBStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
+	stats.Tuples = int(atomic.LoadInt64(&l.tupleCount))
+}
+
+func (l *levelDBStore) Shutdown() {
 	l.db.Close()
 }
 
-func keyForID(id uint64) ([]byte, []byte) {
+func keyForID(id uint64) []byte {
 	entryKey := make([]byte, len(entryPrefix)+8)
 	copy(entryKey, entryPrefix)
 	key := entryKey[len(entryPrefix):]
 	binary.LittleEndian.PutUint64(key, id)
-	return entryKey, key
+	return entryKey
+}
+
+func idFromKey(key []byte) uint64 {
+	return binary.LittleEndian.Uint64(key[len(entryPrefix):])
 }

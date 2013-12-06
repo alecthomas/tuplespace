@@ -67,25 +67,12 @@ On a 2012 MacBook Air 11".
 
 The following extended tuplespace operations are supported:
 
-### `Send(tuples, timeout)`
-
-Send tuples into the tuplespace, with an optional timeout.
-
-### `Take(match, timeout) -> Tuple`
-
-Take (read and remove) a tuple from the tuplespace, with an optional timeout.
-
-### `Read(match, timeout) -> Tuple`
-
-Read a tuple from the tuplespace, with an optional timeout.
-
-### `TakeAll(match, timeout) -> []Tuple`
-
-Take (read and remove) all tuples from the tuplespace, with an optional timeout.
-
-### `ReadAll(match, timeout) -> []Tuple`
-
-Read all tuples from the tuplespace, with an optional timeout.
+- `Send(tuple, timeout)` - Send a tuple into the tuplespace, with an optional timeout.
+- `SendMany(tuples, timeout)` - Send tuples into the tuplespace, with an optional timeout.
+- `Take(match, timeout) -> Tuple` - Take (read and remove) a tuple from the tuplespace, with an optional timeout.
+- `Read(match, timeout) -> Tuple` - Read a tuple from the tuplespace, with an optional timeout.
+- `TakeAll(match, timeout) -> []Tuple` - Take (read and remove) all tuples from the tuplespace, with an optional timeout.
+- `ReadAll(match, timeout) -> []Tuple` - Read all tuples from the tuplespace, with an optional timeout.
 
 ## RESTful tuplespace server
 

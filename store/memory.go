@@ -2,6 +2,7 @@ package store
 
 import (
 	"github.com/alecthomas/tuplespace"
+	"github.com/alecthomas/tuplespace/middleware"
 	"sync/atomic"
 	"time"
 )
@@ -14,10 +15,11 @@ type MemoryStore struct {
 }
 
 // NewMemoryStore creates a new in-memory tuple store.
-func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
+func NewMemoryStore() tuplespace.TupleStore {
+	store := &MemoryStore{
 		tuples: make(map[uint64]*tuplespace.TupleEntry),
 	}
+	return middleware.NewLockingMiddleware(store)
 }
 
 func (m *MemoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
@@ -35,22 +37,32 @@ func (m *MemoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 func (m *MemoryStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, error) {
 	now := time.Now()
 	matches := []*tuplespace.TupleEntry{}
+	deletes := []uint64{}
 	for _, entry := range m.tuples {
 		if now.After(entry.Timeout) {
-			m.Delete(entry.ID)
+			deletes = append(deletes, entry.ID)
 			continue
 		}
 		if match.Match(entry.Tuple) {
 			matches = append(matches, entry)
 		}
 	}
+	if len(deletes) > 0 {
+		m.Delete(deletes)
+	}
 	return matches, nil
 }
 
-func (m *MemoryStore) Delete(id uint64) error {
-	delete(m.tuples, id)
+func (m *MemoryStore) Delete(ids []uint64) error {
+	for _, id := range ids {
+		delete(m.tuples, id)
+	}
 	return nil
 }
 
 func (m *MemoryStore) Shutdown() {
+}
+
+func (m *MemoryStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
+	stats.Tuples = len(m.tuples)
 }
