@@ -1,16 +1,44 @@
-// Package tuplespace provides implementations of a Tuple Space for Go.
+// Package tuplespace provides an implementations of a tuple space for Go.
 //
-// It provides both an in-process asynchronous tuplespace type (use
-// NewTupleSpace) and a RESTful server.
+// It provides both an in-process asynchronous tuplespace (use
+// NewTupleSpace) and a RESTful server binary.
 //
-// Two storage backends are currently available: leveldb and in- memory.
+// Two storage backends are currently available: leveldb and in-memory.
 //
-// Install and the server:
+// To use the in-process tuple space:
 //
-// 		$ go get github.com/alecthomas/tuplespace/bin/tuplespaced
-// 		$ tuplespaced --log-level=info
-// 		[22:26:27 EST 2013/12/05] [INFO] Starting server on http://127.0.0.1:2619/tuplespace/
-//    [22:26:27 EST 2013/12/05] [INFO] Compacting database
+// 		import (
+// 			"github.com/alecthomas/tuplespace"
+// 			"github.com/alecthomas/tuplespace/store"
+// 		)
+//
+// 		func main() {
+//			ts, _ := tuplespace.NewTupleSpace(store.NewMemoryStore())
+//			ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, 0)
+//			tuple, _ := ts.Take(tuplespace.Tuple{"cmd", nil}, 0)
+//			println(tuple.String())
+// 		}
+//
+// Using the client for the server is similarly simple:
+//
+// 		import (
+// 			"github.com/alecthomas/tuplespace"
+// 			"github.com/alecthomas/tuplespace/client"
+// 		)
+//
+// 		func main() {
+//			ts, _ := client.NewTupleClient("http://127.0.0.1:2619/tuplespace/")
+//			ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, 0)
+//			tuple, _ := ts.Take(tuplespace.Tuple{"cmd", nil}, 0)
+//			println(tuple.String())
+// 		}
+//
+// Install and run the server:
+//
+//		$ go get github.com/alecthomas/tuplespace/bin/tuplespaced
+//		$ tuplespaced --log-level=info
+//		[22:26:27 EST 2013/12/05] [INFO] Starting server on http://127.0.0.1:2619/tuplespace/
+//		[22:26:27 EST 2013/12/05] [INFO] Compacting database
 //
 // You can test the tuplespace service with a basic command-line client:
 //
@@ -26,13 +54,13 @@
 //
 // Python bindings are also available:
 //
-// 		$ pip install tuplespace
-// 		$ python
-// 		>>> import tuplespace
-// 		>>> ts = tuplespace.TupleSpace()
-// 		>>> ts.send(('cmd', 'uname -a'))
-// 		>>> ts.take(('cmd', None))
-//    ('cmd', 'uname -a')
+//		$ pip install tuplespace
+//		$ python
+//		>>> import tuplespace
+//		>>> ts = tuplespace.TupleSpace()
+//		>>> ts.send(('cmd', 'uname -a'))
+//		>>> ts.take(('cmd', None))
+//		('cmd', 'uname -a')
 //
 package tuplespace
 
