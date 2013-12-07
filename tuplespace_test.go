@@ -1,4 +1,4 @@
-package tuplespace
+package tuplespace_test
 
 import (
 	log "github.com/alecthomas/log4go"

@@ -116,7 +116,7 @@ func makeService(ts tuplespace.RawTupleSpace, debug bool) *martini.Martini {
 	if debug {
 		m.Use(martini.Logger())
 	}
-	m.Use(render.Renderer("."))
+	m.Use(render.Renderer(render.Options{}))
 
 	m.MapTo(ts, (*tuplespace.RawTupleSpace)(nil))
 

@@ -1,4 +1,5 @@
-# A RESTful tuple space server
+# A RESTful tuple space server [![Build Status](https://travis-ci.org/alecthomas/tuplespace.png)](https://travis-ci.org/alecthomas/tuplespace)
+
 
 This is an implementation of a [tuple space](http://www.mcs.anl.gov/~itf/dbpp/text/node44.html) as a RESTful HTTP service.
 

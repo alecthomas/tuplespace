@@ -1,0 +1,6 @@
+before_install:
+- (cd /tmp; git clone https://code.google.com/p/leveldb/; cd leveldb; make; sudo mv ./libleveldb* /usr/local/lib; sudo cp -a ./include/leveldb /usr/local/include)
+- go get github.com/stretchrcom/testify/assert
+language: go
+go: 1.2
+script: go test  -ldflags='-r /usr/local/lib' -v ./...
