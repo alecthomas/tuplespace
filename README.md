@@ -31,7 +31,7 @@ Python client:
 ('cmd', 'uname -a')
 ```
 
-## Performance
+## Performance of service
 
 On a 2012 MacBook Air 11".
 
@@ -43,9 +43,11 @@ On a 2012 MacBook Air 11".
 
 `LevelDBStore`:
 
-- `SendMany` 1M - 307K tps
+- `SendMany` 1M - 272K tps
 - `ReadAll` 1M - 61K tps
-- `TakeAll` 1M - 33K tps
+- `TakeAll` 1M - 56K tps
+
+**Note:** this includes serialization and deserialization overhead.
 
 ## Caveats
 

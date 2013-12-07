@@ -24,10 +24,10 @@ func (l *lockingMiddleware) Put(tuples []tuplespace.Tuple, timeout time.Time) er
 	return l.store.Put(tuples, timeout)
 }
 
-func (l *lockingMiddleware) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, error) {
+func (l *lockingMiddleware) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
-	return l.store.Match(match)
+	return l.store.Match(match, limit)
 }
 
 func (l *lockingMiddleware) Delete(ids []uint64) error {

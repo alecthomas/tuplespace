@@ -13,6 +13,11 @@ type TupleEntry struct {
 	Timeout time.Time
 }
 
+// IsExpired returns whether the entry has expired.
+func (t *TupleEntry) IsExpired(now time.Time) bool {
+	return !t.Timeout.IsZero() && now.After(t.Timeout)
+}
+
 // A TupleStore handles efficient storage and retrieval of tuples.
 //
 // - Implementations MUST purge expired entries.
@@ -22,7 +27,7 @@ type TupleStore interface {
 	Put(tuple []Tuple, timeout time.Time) error
 	// Match retrieves tuples from the store that match "match". This MUST NOT
 	// return expired tuples.
-	Match(match Tuple) ([]*TupleEntry, error)
+	Match(match Tuple, limit int) ([]*TupleEntry, error)
 	// Delete an entry in the store. "id" is TupleEntry.ID.
 	Delete(ids []uint64) error
 	// Shutdown the store.
@@ -37,7 +42,7 @@ type TupleSpaceStats struct {
 	Tuples  int `json:"tuples"`
 }
 
-func (t *TupleSpaceStats) String() string {
+func (t TupleSpaceStats) String() string {
 	return fmt.Sprintf("Waiters: %d, Tuples: %d", t.Waiters, t.Tuples)
 }
 

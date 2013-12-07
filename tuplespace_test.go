@@ -1,4 +1,4 @@
-package tuplespace_test
+package tuplespace
 
 import (
 	log "github.com/alecthomas/log4go"
@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	log.AddFilter("stdout", log.INFO, log.NewConsoleLogWriter())
+	log.AddFilter("stdout", log.WARNING, log.NewConsoleLogWriter())
 }
 
 func TestTupleMatch(t *testing.T) {
@@ -69,31 +69,22 @@ func TestTupleSpaceTakeAll(t *testing.T) {
 	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 0})
 }
 
-func TestTupleSpaceStressTestSend(t *testing.T) {
-	log.AddFilter("stdout", log.INFO, log.NewConsoleLogWriter())
-
-	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
-	defer ts.Shutdown()
-
-	for i := 0; i < 10000; i++ {
-		ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, time.Millisecond*500)
+func sendN(ts tuplespace.TupleSpace, n int, timeout time.Duration) {
+	tuples := make([]tuplespace.Tuple, n)
+	for i := 0; i < n; i++ {
+		tuples[i] = tuplespace.Tuple{"cmd", "uname -a"}
 	}
-
-	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 10000})
-	time.Sleep(time.Second)
-	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 0})
+	ts.SendMany(tuples, timeout)
 }
 
-func TestTupleSpaceStressTestSendAndReadConcurrently(t *testing.T) {
+func TestTupleSpaceStressTestSend(t *testing.T) {
 	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
 	defer ts.Shutdown()
 
-	for i := 0; i < 10000; i++ {
-		ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, time.Millisecond*500)
-	}
-
+	sendN(ts, 10000, time.Millisecond*500)
 	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 10000})
 	time.Sleep(time.Second)
+	ts.ReadAll(tuplespace.Tuple{}, 1)
 	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 0})
 }
 
@@ -107,20 +98,34 @@ func BenchmarkTupleSpaceSend(b *testing.B) {
 
 func BenchmarkTupleSpaceRead(b *testing.B) {
 	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
-	for i := 0; i < b.N; i++ {
-		ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, 0)
-	}
+	sendN(ts, b.N, 0)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ts.Read(tuplespace.Tuple{"cmd", nil}, 0)
 	}
 }
 
+func BenchmarkTupleSpaceReadAll100(b *testing.B) {
+	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
+	sendN(ts, 100, 0)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ts.ReadAll(tuplespace.Tuple{"cmd", nil}, 0)
+	}
+}
+
+func BenchmarkTupleSpaceReadAll1000(b *testing.B) {
+	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
+	sendN(ts, 1000, 0)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ts.ReadAll(tuplespace.Tuple{"cmd", nil}, 0)
+	}
+}
+
 func BenchmarkTupleSpaceTake(b *testing.B) {
 	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
-	for i := 0; i < b.N; i++ {
-		ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, 0)
-	}
+	sendN(ts, b.N, 0)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ts.Take(tuplespace.Tuple{"cmd", nil}, 0)

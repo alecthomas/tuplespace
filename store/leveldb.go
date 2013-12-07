@@ -102,7 +102,7 @@ func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	return nil
 }
 
-func (l *levelDBStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, error) {
+func (l *levelDBStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
 	// Batch delete all expired entries.
 	deletes := levigo.NewWriteBatch()
 	deleted := 0
@@ -120,12 +120,15 @@ func (l *levelDBStore) Match(match tuplespace.Tuple) ([]*tuplespace.TupleEntry, 
 		if err != nil {
 			return nil, err
 		}
-		if !entry.Timeout.IsZero() && now.After(entry.Timeout) {
+		if entry.IsExpired(now) {
 			deletes.Delete(it.Key())
 			deleted++
 		} else {
 			if match.Match(entry.Tuple) {
 				matches = append(matches, entry)
+				if len(matches) == limit {
+					break
+				}
 			}
 		}
 	}

@@ -79,9 +79,8 @@ type tupleWaiter struct {
 	matches chan []Tuple
 	timeout time.Time
 	actions int
-	// true if tuples were found, false otherwise
-	result chan error
-	cancel chan *tupleWaiter
+	err     chan error
+	cancel  chan *tupleWaiter
 }
 
 type tupleSend struct {
@@ -117,7 +116,7 @@ func (t *tupleWaiter) Get() chan []Tuple {
 }
 
 func (t *tupleWaiter) Error() chan error {
-	return t.result
+	return t.err
 }
 
 func newWaiter(cancel chan *tupleWaiter, match Tuple, timeout time.Duration, actions int) *tupleWaiter {
@@ -129,7 +128,7 @@ func newWaiter(cancel chan *tupleWaiter, match Tuple, timeout time.Duration, act
 		match:   match,
 		matches: make(chan []Tuple, 1),
 		timeout: expires,
-		result:  make(chan error, 1),
+		err:     make(chan error, 1),
 		actions: actions,
 		cancel:  cancel,
 	}
@@ -139,7 +138,6 @@ type tupleSpaceImpl struct {
 	store        TupleStore
 	waiters      map[*tupleWaiter]interface{}
 	waitersLock  sync.RWMutex
-	in           chan *tupleSend
 	cancel       chan *tupleWaiter
 	shutdown     chan bool
 	id           uint64
@@ -151,7 +149,6 @@ type tupleSpaceImpl struct {
 func NewRawTupleSpace(store TupleStore) RawTupleSpace {
 	ts := &tupleSpaceImpl{
 		waiters:      make(map[*tupleWaiter]interface{}),
-		in:           make(chan *tupleSend, 16),
 		cancel:       make(chan *tupleWaiter, 16),
 		shutdown:     make(chan bool, 1),
 		statsUpdated: sync.NewCond(&sync.Mutex{}),
@@ -167,8 +164,6 @@ func (t *tupleSpaceImpl) run() {
 	purgeTimer := time.Tick(time.Millisecond * 250)
 	for {
 		select {
-		case send := <-t.in:
-			t.processNewEntries(send)
 		case waiter := <-t.cancel:
 			t.cancelWaiter(waiter)
 		case <-purgeTimer:
@@ -194,7 +189,7 @@ func (t *tupleSpaceImpl) cancelWaiter(waiter *tupleWaiter) {
 	t.waitersLock.Lock()
 	defer t.waitersLock.Unlock()
 	delete(t.waiters, waiter)
-	waiter.result <- CancelledReader
+	waiter.err <- CancelledReader
 }
 
 func (t *tupleSpaceImpl) updateStats() {
@@ -202,15 +197,15 @@ func (t *tupleSpaceImpl) updateStats() {
 	defer t.statsUpdated.L.Unlock()
 	t.waitersLock.RLock()
 	defer t.waitersLock.RUnlock()
-	log.Finest("Updating stats")
 	t.stats.Waiters = len(t.waiters)
 	t.store.UpdateStats(&t.stats)
 	t.statsUpdated.Broadcast()
 }
 
-func (t *tupleSpaceImpl) processNewEntries(entries *tupleSend) {
+func (t *tupleSpaceImpl) processNewEntries(entries *tupleSend) error {
 	t.waitersLock.Lock()
 	defer t.waitersLock.Unlock()
+
 	for waiter := range t.waiters {
 		matches := []Tuple{}
 		for i, tuple := range entries.tuples {
@@ -218,7 +213,7 @@ func (t *tupleSpaceImpl) processNewEntries(entries *tupleSend) {
 				matches = append(matches, tuple)
 				matches[i] = nil
 				if waiter.actions&ActionTake != 0 {
-					return
+					break
 				}
 			}
 		}
@@ -228,38 +223,52 @@ func (t *tupleSpaceImpl) processNewEntries(entries *tupleSend) {
 		}
 	}
 
-	err := t.store.Put(entries.tuples, entries.timeout)
-	if err != nil {
-		panic(err.Error())
+	// Clear taken entries
+	tuples := make([]Tuple, 0, len(entries.tuples))
+	for _, tuple := range entries.tuples {
+		if tuple != nil {
+			tuples = append(tuples, tuple)
+		}
 	}
+
+	err := t.store.Put(tuples, entries.timeout)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
-	stored, err := t.store.Match(waiter.match)
-	if err != nil {
-		panic(err.Error())
+	one := waiter.actions&ActionOne != 0
+	take := waiter.actions&ActionTake != 0
+	limit := 0
+	if one {
+		limit = 1
 	}
-	var matches []Tuple
+	stored, err := t.store.Match(waiter.match, limit)
+	if err != nil {
+		waiter.err <- err
+		return
+	}
+	matches := make([]Tuple, 0, len(stored))
 	deletes := []uint64{}
 	for _, entry := range stored {
-		if waiter.match.Match(entry.Tuple) {
-			matches = append(matches, entry.Tuple)
-			if waiter.actions&ActionTake != 0 {
-				deletes = append(deletes, entry.ID)
-			}
-			if waiter.actions&ActionOne != 0 {
-				break
-			}
+		matches = append(matches, entry.Tuple)
+		if take {
+			deletes = append(deletes, entry.ID)
+		}
+		if one {
+			break
 		}
 	}
 
 	if len(deletes) > 0 {
-		log.Fine("Deleting %d taken tuples", len(deletes))
+		log.Fine("Deleting %d tuples taken by %s", len(deletes), waiter)
 		t.store.Delete(deletes)
 	}
 
 	if len(matches) > 0 {
-		log.Fine("Read %s immediately returned %d matching tuples", waiter, len(matches))
+		log.Fine("Waiter %s immediately returned %d matching tuples", waiter, len(matches))
 		waiter.matches <- matches
 	} else {
 		log.Fine("Adding new waiter %s", waiter)
@@ -279,7 +288,7 @@ func (t *tupleSpaceImpl) purge() {
 	for waiter := range t.waiters {
 		if !waiter.timeout.IsZero() && waiter.timeout.Before(now) {
 			delete(t.waiters, waiter)
-			waiter.result <- ReaderTimeout
+			waiter.err <- ReaderTimeout
 			waiters++
 		}
 	}
@@ -293,8 +302,7 @@ func (t *tupleSpaceImpl) SendMany(tuples []Tuple, timeout time.Duration) error {
 		expires = time.Now().Add(timeout)
 	}
 	entry := &tupleSend{tuples: tuples, timeout: expires}
-	t.in <- entry
-	return nil
+	return t.processNewEntries(entry)
 }
 
 func (t *tupleSpaceImpl) ReadOperation(match Tuple, timeout time.Duration, actions int) ReadOperationHandle {

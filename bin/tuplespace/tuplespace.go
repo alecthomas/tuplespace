@@ -16,6 +16,7 @@ var (
 	serverFlag  = pflag.String("server", "http://127.0.0.1:2619/tuplespace/", "tuplespace server address")
 	timeoutFlag = pflag.Duration("timeout", time.Second*60, "tuplespace operation timeout")
 	copiesFlag  = pflag.Int("copies", 1, "number of copies of the tuple to send")
+	silentFlag  = pflag.Bool("silent", false, "don't display received tuples")
 )
 
 func fatalf(f string, args ...interface{}) {
@@ -93,7 +94,9 @@ Examples:
 		if err != nil {
 			fatalf("failed to read tuple: %s", err)
 		}
-		fmt.Printf("%v\n", tuple)
+		if !*silentFlag {
+			fmt.Printf("%v\n", tuple)
+		}
 
 	case "readall", "takeall":
 		match := parseTuple(pflag.Arg(1))
@@ -108,8 +111,10 @@ Examples:
 		if err != nil {
 			fatalf("failed to read tuples: %s", err)
 		}
-		for _, tuple := range tuples {
-			fmt.Printf("%s\n", tuple)
+		if !*silentFlag {
+			for _, tuple := range tuples {
+				fmt.Printf("%s\n", tuple)
+			}
 		}
 
 	default:
