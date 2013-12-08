@@ -54,16 +54,17 @@ On a 2012 MacBook Air 11".
 
 - No replication.
 - No reservations (transactions).
+- Matching (read/take) is currently very naive and simply iterates over all tuples.
 
 ## Plans
 
 - Implement fault tolerance (possibly using Raft).
 - Implement reservations.
-- Implement
+- Implement indexing on tuple fields to speed up matching.
 
 ## Glossary
 
-- **Tuple**: A fixed length, ordered collection, of typed values.
+- **Tuple**: A fixed length ordered collection of typed values.
 - **Match**: A tuple-like object that is matched against tuples in the tuplespace. Null elements will match any value, and non-null elements match the same value in a tuple.
 
 ## Operations

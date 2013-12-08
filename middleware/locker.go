@@ -30,10 +30,10 @@ func (l *lockingMiddleware) Match(match tuplespace.Tuple, limit int) ([]*tuplesp
 	return l.store.Match(match, limit)
 }
 
-func (l *lockingMiddleware) Delete(ids []uint64) error {
+func (l *lockingMiddleware) Delete(entries []*tuplespace.TupleEntry) error {
 	l.lock.Lock()
 	defer l.lock.Unlock()
-	return l.store.Delete(ids)
+	return l.store.Delete(entries)
 }
 
 func (l *lockingMiddleware) Shutdown() {

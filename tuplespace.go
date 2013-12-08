@@ -251,11 +251,11 @@ func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
 		return
 	}
 	matches := make([]Tuple, 0, len(stored))
-	deletes := []uint64{}
+	deletes := []*TupleEntry{}
 	for _, entry := range stored {
 		matches = append(matches, entry.Tuple)
 		if take {
-			deletes = append(deletes, entry.ID)
+			deletes = append(deletes, entry)
 		}
 		if one {
 			break
@@ -280,7 +280,6 @@ func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
 
 // Purge expired waiters.
 func (t *tupleSpaceImpl) purge() {
-	log.Fine("Purging waiters")
 	t.waitersLock.Lock()
 	defer t.waitersLock.Unlock()
 	now := time.Now()
@@ -292,11 +291,13 @@ func (t *tupleSpaceImpl) purge() {
 			waiters++
 		}
 	}
-	log.Fine("Purged %d waiters", waiters)
+	if waiters > 0 {
+		log.Fine("Purged %d waiters", waiters)
+	}
 }
 
 func (t *tupleSpaceImpl) SendMany(tuples []Tuple, timeout time.Duration) error {
-	log.Debug("Send(%s, %s)", tuples, timeout)
+	log.Debug("Send(%d, %s)", len(tuples), timeout)
 	var expires time.Time
 	if timeout != 0 {
 		expires = time.Now().Add(timeout)

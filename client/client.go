@@ -61,7 +61,7 @@ func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) 
 		return err
 	}
 	decoder := json.NewDecoder(hresp.Body)
-	if hresp.StatusCode < 200 && hresp.StatusCode > 299 {
+	if hresp.StatusCode < 200 || hresp.StatusCode > 299 {
 		if hresp.StatusCode == http.StatusGatewayTimeout {
 			return tuplespace.ReaderTimeout
 		}
@@ -99,7 +99,7 @@ func (t *tupleSpaceClient) ReadOperation(match tuplespace.Tuple, timeout time.Du
 		Match:   match,
 		Timeout: timeout,
 	}
-	req.All = (actions&tuplespace.ActionOne == 0)
+	req.All = actions&tuplespace.ActionOne == 0
 	resp := &tuplespace.ReadResponse{}
 	err := t.do(method, req, resp)
 	if err != nil {

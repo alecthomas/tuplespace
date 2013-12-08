@@ -55,12 +55,12 @@ func (m *memoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.Tu
 	}
 
 	if len(deletes) > 0 {
-		m.Delete(deletes)
+		m.delete(deletes)
 	}
 	return matches, nil
 }
 
-func (m *memoryStore) Delete(ids []uint64) error {
+func (m *memoryStore) delete(ids []uint64) error {
 	log.Finest("Deleting %d tuples", len(ids))
 	for _, id := range ids {
 		delete(m.tuples, id)

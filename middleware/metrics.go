@@ -25,8 +25,8 @@ func (t *metricsMiddleware) Match(match tuplespace.Tuple, limit int) ([]*tuplesp
 	return t.store.Match(match, limit)
 }
 
-func (t *metricsMiddleware) Delete(ids []uint64) error {
-	return t.store.Delete(ids)
+func (t *metricsMiddleware) Delete(entries []*tuplespace.TupleEntry) error {
+	return t.store.Delete(entries)
 }
 
 func (t *metricsMiddleware) Shutdown() {

@@ -112,7 +112,7 @@ func takeOrRead(take bool, ts tuplespace.RawTupleSpace, w http.ResponseWriter,
 
 func makeService(ts tuplespace.RawTupleSpace, debug bool) *martini.Martini {
 	m := martini.New()
-	m.Use(martini.Recovery())
+	// m.Use(martini.Recovery())
 	if debug {
 		m.Use(martini.Logger())
 	}

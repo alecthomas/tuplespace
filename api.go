@@ -28,8 +28,8 @@ type TupleStore interface {
 	// Match retrieves tuples from the store that match "match". This MUST NOT
 	// return expired tuples.
 	Match(match Tuple, limit int) ([]*TupleEntry, error)
-	// Delete an entry in the store. "id" is TupleEntry.ID.
-	Delete(ids []uint64) error
+	// Delete a set of entries in the store.
+	Delete(entries []*TupleEntry) error
 	// Shutdown the store.
 	Shutdown()
 	// Update statistics.

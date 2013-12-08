@@ -20,7 +20,7 @@ var (
 )
 
 func fatalf(f string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "error: "+f, args...)
+	fmt.Fprintf(os.Stderr, "error: "+f+"\n", args...)
 	os.Exit(1)
 }
 
