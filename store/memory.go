@@ -9,7 +9,6 @@ import (
 )
 
 type memoryStore struct {
-	tuplespace.TupleStore
 	id     uint64
 	tuples map[uint64]*tuplespace.TupleEntry
 }
@@ -38,12 +37,12 @@ func (m *memoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 func (m *memoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
 	now := time.Now()
 	matches := make([]*tuplespace.TupleEntry, 0, 32)
-	deletes := make([]uint64, 0, 32)
+	deletes := make([]*tuplespace.TupleEntry, 0, 32)
 
 	log.Info("Matching %s against %d tuples limit %d", match, len(m.tuples), limit)
 	for _, entry := range m.tuples {
 		if entry.IsExpired(now) {
-			deletes = append(deletes, entry.ID)
+			deletes = append(deletes, entry)
 			continue
 		}
 		if match.Match(entry.Tuple) {
@@ -55,15 +54,15 @@ func (m *memoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.Tu
 	}
 
 	if len(deletes) > 0 {
-		m.delete(deletes)
+		m.Delete(deletes)
 	}
 	return matches, nil
 }
 
-func (m *memoryStore) delete(ids []uint64) error {
-	log.Finest("Deleting %d tuples", len(ids))
-	for _, id := range ids {
-		delete(m.tuples, id)
+func (m *memoryStore) Delete(entries []*tuplespace.TupleEntry) error {
+	log.Finest("Deleting %d tuples", len(entries))
+	for _, entry := range entries {
+		delete(m.tuples, entry.ID)
 	}
 	return nil
 }
