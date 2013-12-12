@@ -202,42 +202,57 @@ func (t *tupleSpaceImpl) updateStats() {
 	t.statsUpdated.Broadcast()
 }
 
-func (t *tupleSpaceImpl) processNewEntries(entries *tupleSend) error {
+func (t *tupleSpaceImpl) processNewEntries(tuples []Tuple, timeout time.Time) error {
 	t.waitersLock.Lock()
 	defer t.waitersLock.Unlock()
 
+	available := len(tuples)
+
+	// Check for matches against waiters and delete them if they match.
 	for waiter := range t.waiters {
-		matches := []Tuple{}
-		for i, tuple := range entries.tuples {
+		take := waiter.actions&ActionTake != 0
+		one := waiter.actions&ActionOne != 0
+		var matches []Tuple
+		for i, tuple := range tuples {
 			if tuple != nil && waiter.match.Match(tuple) {
 				matches = append(matches, tuple)
-				matches[i] = nil
-				if waiter.actions&ActionTake != 0 {
+				if take {
+					tuples[i] = nil
+					available--
+				}
+				if one {
 					break
 				}
 			}
 		}
+
+		// Remove and signal the waiter that matched.
 		if len(matches) > 0 {
 			delete(t.waiters, waiter)
 			waiter.matches <- matches
 		}
-	}
 
-	// Clear taken entries
-	tuples := make([]Tuple, 0, len(entries.tuples))
-	for _, tuple := range entries.tuples {
-		if tuple != nil {
-			tuples = append(tuples, tuple)
+		// If all tuples have been taken, there's nothing else to do.
+		if available == 0 {
+			return nil
 		}
 	}
 
-	err := t.store.Put(tuples, entries.timeout)
-	if err != nil {
-		return err
+	// Remove entries taken by waiters.
+	remaining := make([]Tuple, 0, len(tuples))
+	for _, tuple := range tuples {
+		if tuple != nil {
+			remaining = append(remaining, tuple)
+		}
 	}
-	return nil
+
+	// Finally, store the remaining tuples.
+	return t.store.Put(remaining, timeout)
 }
 
+// When a new waiter arrives, we check if it matches existing tuples. If so,
+// we return those tuples. If not, the waiter is added to the list of waiters
+// that will match against future tuples.
 func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
 	one := waiter.actions&ActionOne != 0
 	take := waiter.actions&ActionTake != 0
@@ -302,8 +317,7 @@ func (t *tupleSpaceImpl) SendMany(tuples []Tuple, timeout time.Duration) error {
 	if timeout != 0 {
 		expires = time.Now().Add(timeout)
 	}
-	entry := &tupleSend{tuples: tuples, timeout: expires}
-	return t.processNewEntries(entry)
+	return t.processNewEntries(tuples, expires)
 }
 
 func (t *tupleSpaceImpl) ReadOperation(match Tuple, timeout time.Duration, actions int) ReadOperationHandle {

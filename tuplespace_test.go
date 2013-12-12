@@ -5,6 +5,8 @@ import (
 	"github.com/alecthomas/tuplespace"
 	"github.com/alecthomas/tuplespace/store"
 	"github.com/stretchrcom/testify/assert"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -77,14 +79,55 @@ func sendN(ts tuplespace.TupleSpace, n int, timeout time.Duration) {
 	ts.SendMany(tuples, timeout)
 }
 
-func TestTupleSpaceStressTestSend(t *testing.T) {
+func TestTupleSpaceStressTestSendTake(t *testing.T) {
 	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
 	defer ts.Shutdown()
 
-	sendN(ts, 10000, time.Millisecond*500)
-	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 10000})
-	time.Sleep(time.Second)
-	ts.ReadAll(tuplespace.Tuple{}, 1)
+	threads := 32
+	messages := 1000
+
+	var sent int32
+	var read int32
+
+	readWait := sync.WaitGroup{}
+	for i := 0; i < threads; i++ {
+		match := tuplespace.Tuple{"reader", i}
+		readWait.Add(1)
+		go func() {
+			for n := 0; n < messages; n++ {
+				tuple, err := ts.Take(match, time.Second*2)
+				assert.NoError(t, err)
+				assert.Equal(t, tuple, match)
+				if err == nil {
+					atomic.AddInt32(&read, 1)
+				}
+			}
+			readWait.Done()
+		}()
+	}
+
+	writeWait := sync.WaitGroup{}
+	for i := 0; i < threads; i++ {
+		tuple := tuplespace.Tuple{"reader", i}
+		writeWait.Add(1)
+		go func() {
+			for n := 0; n < messages; n++ {
+				err := ts.Send(tuple, 0)
+				assert.NoError(t, err)
+				if err == nil {
+					atomic.AddInt32(&sent, 1)
+				}
+			}
+			writeWait.Done()
+		}()
+	}
+
+	writeWait.Wait()
+	assert.Equal(t, sent, threads*messages)
+
+	readWait.Wait()
+	assert.Equal(t, sent, read)
+
 	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 0})
 }
 
