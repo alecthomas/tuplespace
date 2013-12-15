@@ -15,18 +15,6 @@ func init() {
 	log.AddFilter("stdout", log.WARNING, log.NewConsoleLogWriter())
 }
 
-func TestTupleMatch(t *testing.T) {
-	tuple := tuplespace.Tuple{"cmd", "uname -a"}
-	match := tuplespace.Tuple{"cmd", nil}
-	assert.True(t, match.Match(tuple))
-}
-
-func TestTupleDoesNotMatch(t *testing.T) {
-	tuple := tuplespace.Tuple{"cmd", "uname -a"}
-	match := tuplespace.Tuple{"not", nil}
-	assert.False(t, match.Match(tuple))
-}
-
 func TestTupleSpaceRead(t *testing.T) {
 	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
 	defer ts.Shutdown()
@@ -34,7 +22,7 @@ func TestTupleSpaceRead(t *testing.T) {
 	ts.Send(tuplespace.Tuple{"cmd", "uptime"}, 0)
 	_, err := ts.Read(tuplespace.Tuple{"cmd", nil}, time.Second)
 	assert.NoError(t, err)
-	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 2})
+	assert.Equal(t, ts.Stats().Tuples, 2)
 }
 
 func TestTupleSpaceReadAll(t *testing.T) {
@@ -46,7 +34,7 @@ func TestTupleSpaceReadAll(t *testing.T) {
 	tuples, err := ts.ReadAll(tuplespace.Tuple{"cmd", nil}, time.Second)
 	assert.NoError(t, err)
 	assert.Equal(t, tuples, []tuplespace.Tuple{tuplespace.Tuple{"cmd", "uname -a"}, tuplespace.Tuple{"cmd", "uptime"}})
-	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 2})
+	assert.Equal(t, ts.Stats().Tuples, 2)
 }
 
 func TestTupleSpaceTake(t *testing.T) {
@@ -56,7 +44,7 @@ func TestTupleSpaceTake(t *testing.T) {
 	ts.Send(tuplespace.Tuple{"cmd", "uptime"}, 0)
 	_, err := ts.Take(tuplespace.Tuple{"cmd", nil}, time.Second)
 	assert.NoError(t, err)
-	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 1})
+	assert.Equal(t, ts.Stats().Tuples, 1)
 }
 
 func TestTupleSpaceTakeAll(t *testing.T) {
@@ -68,7 +56,7 @@ func TestTupleSpaceTakeAll(t *testing.T) {
 	tuples, err := ts.TakeAll(tuplespace.Tuple{"cmd", nil}, time.Second)
 	assert.NoError(t, err)
 	assert.Equal(t, len(tuples), 2)
-	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 0})
+	assert.Equal(t, ts.Stats().Tuples, 0)
 }
 
 func sendN(ts tuplespace.TupleSpace, n int, timeout time.Duration) {
@@ -80,22 +68,33 @@ func sendN(ts tuplespace.TupleSpace, n int, timeout time.Duration) {
 }
 
 func TestTupleSpaceStressTestSendTake(t *testing.T) {
-	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
+	// dir, err := ioutil.TempDir("", "TestTupleSpaceStressTestSendTake")
+	// if err != nil {
+	// 	t.Fatalf("%s", err.Error())
+	// }
+	// defer os.RemoveAll(dir)
+	// s, err := store.NewLevelDBStore(dir)
+	// if err != nil {
+	// 	t.Fatalf("%s", err.Error())
+	// }
+
+	s := store.NewMemoryStore()
+	ts := tuplespace.NewTupleSpace(s)
 	defer ts.Shutdown()
 
-	threads := 32
-	messages := 1000
+	threads := 64
+	messages := 100
 
 	var sent int32
 	var read int32
 
 	readWait := sync.WaitGroup{}
 	for i := 0; i < threads; i++ {
-		match := tuplespace.Tuple{"reader", i}
 		readWait.Add(1)
-		go func() {
+		go func(i int) {
 			for n := 0; n < messages; n++ {
-				tuple, err := ts.Take(match, time.Second*2)
+				match := tuplespace.Tuple{"reader", int64(i), int64(n)}
+				tuple, err := ts.Take(match, time.Minute)
 				assert.NoError(t, err)
 				assert.Equal(t, tuple, match)
 				if err == nil {
@@ -103,15 +102,15 @@ func TestTupleSpaceStressTestSendTake(t *testing.T) {
 				}
 			}
 			readWait.Done()
-		}()
+		}(i)
 	}
 
 	writeWait := sync.WaitGroup{}
 	for i := 0; i < threads; i++ {
-		tuple := tuplespace.Tuple{"reader", i}
 		writeWait.Add(1)
-		go func() {
+		go func(i int) {
 			for n := 0; n < messages; n++ {
+				tuple := tuplespace.Tuple{"reader", int64(i), int64(n)}
 				err := ts.Send(tuple, 0)
 				assert.NoError(t, err)
 				if err == nil {
@@ -119,7 +118,7 @@ func TestTupleSpaceStressTestSendTake(t *testing.T) {
 				}
 			}
 			writeWait.Done()
-		}()
+		}(i)
 	}
 
 	writeWait.Wait()
@@ -128,7 +127,12 @@ func TestTupleSpaceStressTestSendTake(t *testing.T) {
 	readWait.Wait()
 	assert.Equal(t, sent, read)
 
-	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{Tuples: 0})
+	assert.Equal(t, ts.Stats(), tuplespace.TupleSpaceStats{
+		TuplesSeen:  int64(threads * messages),
+		WaitersSeen: int64(threads * messages),
+		TuplesTaken: int64(threads * messages),
+		TuplesRead:  0,
+	})
 }
 
 func BenchmarkTupleSpaceSend(b *testing.B) {

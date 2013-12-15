@@ -9,15 +9,15 @@ type ErrorResponse struct {
 }
 
 type SendRequest struct {
-	Tuples  []Tuple       `json:"tuples" required`
+	Tuples  []Tuple       `json:"tuples"`
 	Timeout time.Duration `json:"timeout"`
 }
 
 type SendResponse struct{}
 
-// A request sent as JSON from a client.
+// A ReadRequest sent as JSON from a client.
 type ReadRequest struct {
-	Match Tuple `json:"match" required`
+	Match Tuple `json:"match"`
 	// Timeout for read request. Defaults to a very large period of time indeed.
 	Timeout time.Duration `json:"timeout"`
 	// Read all tuples.

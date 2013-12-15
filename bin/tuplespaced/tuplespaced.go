@@ -4,10 +4,9 @@ import (
 	"fmt"
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
+	"github.com/alecthomas/tuplespace/server"
 	"github.com/alecthomas/tuplespace/store"
 	"github.com/codegangsta/martini"
-	"github.com/codegangsta/martini-contrib/binding"
-	"github.com/codegangsta/martini-contrib/render"
 	"github.com/ogier/pflag"
 	"net/http"
 	"os"
@@ -46,35 +45,25 @@ func fatalf(f string, args ...interface{}) {
 	os.Exit(1)
 }
 
-func Send(ts tuplespace.RawTupleSpace, req tuplespace.SendRequest, resp render.Render, errors binding.Errors) {
-	if errors.Count() > 0 {
-		resp.JSON(http.StatusBadRequest, &tuplespace.ErrorResponse{Error: "invalid request structure"})
-		return
-	}
-
+func Send(ts tuplespace.RawTupleSpace, r *http.Request, req tuplespace.SendRequest, resp server.ResponseSerializer) {
 	err := ts.SendMany(req.Tuples, req.Timeout)
 
 	if err != nil {
-		resp.JSON(http.StatusInternalServerError, &tuplespace.ErrorResponse{Error: err.Error()})
+		resp.Error(http.StatusInternalServerError, err)
 	} else {
-		resp.JSON(http.StatusCreated, &tuplespace.SendResponse{})
+		resp.Serialize(http.StatusOK, &tuplespace.SendResponse{})
 	}
 }
 
-func Read(ts tuplespace.RawTupleSpace, w http.ResponseWriter, req tuplespace.ReadRequest, resp render.Render, errors binding.Errors) {
-	takeOrRead(false, ts, w, req, resp, errors)
+func Read(ts tuplespace.RawTupleSpace, resp server.ResponseSerializer, req tuplespace.ReadRequest, w http.ResponseWriter) {
+	takeOrRead(false, ts, resp, req, w)
 }
 
-func Take(ts tuplespace.RawTupleSpace, w http.ResponseWriter, req tuplespace.ReadRequest, resp render.Render, errors binding.Errors) {
-	takeOrRead(true, ts, w, req, resp, errors)
+func Take(ts tuplespace.RawTupleSpace, resp server.ResponseSerializer, req tuplespace.ReadRequest, w http.ResponseWriter) {
+	takeOrRead(true, ts, resp, req, w)
 }
 
-func takeOrRead(take bool, ts tuplespace.RawTupleSpace, w http.ResponseWriter,
-	req tuplespace.ReadRequest, resp render.Render, errors binding.Errors) {
-	if errors.Count() > 0 {
-		resp.JSON(http.StatusBadRequest, &tuplespace.ErrorResponse{Error: "invalid request structure"})
-		return
-	}
+func takeOrRead(take bool, ts tuplespace.RawTupleSpace, resp server.ResponseSerializer, req tuplespace.ReadRequest, w http.ResponseWriter) {
 
 	var tuples []tuplespace.Tuple
 	var err error
@@ -104,26 +93,26 @@ func takeOrRead(take bool, ts tuplespace.RawTupleSpace, w http.ResponseWriter,
 		} else if err == tuplespace.CancelledReader {
 			status = http.StatusRequestTimeout
 		}
-		resp.JSON(status, &tuplespace.ErrorResponse{Error: err.Error()})
+		resp.Error(status, err)
 	} else {
-		resp.JSON(http.StatusOK, &tuplespace.ReadResponse{Tuples: tuples})
+		resp.Serialize(http.StatusOK, &tuplespace.ReadResponse{Tuples: tuples})
 	}
 }
 
 func makeService(ts tuplespace.RawTupleSpace, debug bool) *martini.Martini {
 	m := martini.New()
-	// m.Use(martini.Recovery())
+	m.Use(martini.Recovery())
 	if debug {
 		m.Use(martini.Logger())
 	}
-	m.Use(render.Renderer(render.Options{}))
+	m.Use(server.SerializationMiddleware())
 
 	m.MapTo(ts, (*tuplespace.RawTupleSpace)(nil))
 
 	r := martini.NewRouter()
-	r.Post("/tuplespace/", binding.Json(tuplespace.SendRequest{}), Send)
-	r.Get("/tuplespace/", binding.Json(tuplespace.ReadRequest{}), Read)
-	r.Delete("/tuplespace/", binding.Json(tuplespace.ReadRequest{}), Take)
+	r.Post("/tuplespace/", server.DeserializerMiddleware(tuplespace.SendRequest{}), Send)
+	r.Get("/tuplespace/", server.DeserializerMiddleware(tuplespace.ReadRequest{}), Read)
+	r.Delete("/tuplespace/", server.DeserializerMiddleware(tuplespace.ReadRequest{}), Take)
 
 	m.Action(r.Handle)
 	return m

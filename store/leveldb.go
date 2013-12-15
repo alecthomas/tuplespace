@@ -3,10 +3,10 @@ package store
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
 	"github.com/jmhodges/levigo"
+	"github.com/vmihailenco/msgpack"
 	"hash/fnv"
 	"sync/atomic"
 	"time"
@@ -97,7 +97,7 @@ func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 			Tuple:   tuple,
 			Timeout: timeout,
 		}
-		value, err := json.Marshal(entry)
+		value, err := msgpack.Marshal(entry)
 		if err != nil {
 			return err
 		}
@@ -114,7 +114,7 @@ func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 }
 
 func (l *levelDBStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
-	entries, deleted, err := l.matchWithIndex(match, limit)
+	entries, deleted, err := l.matchWithIteration(match, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func (l *levelDBStore) Delete(entries []*tuplespace.TupleEntry) error {
 }
 
 func (l *levelDBStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
-	stats.Tuples = int(atomic.LoadInt64(&l.tupleCount))
+	stats.Tuples = atomic.LoadInt64(&l.tupleCount)
 }
 
 func (l *levelDBStore) Shutdown() {
@@ -165,7 +165,7 @@ func (l *levelDBStore) matchWithIteration(match tuplespace.Tuple, limit int) ([]
 			break
 		}
 		entry := &tuplespace.TupleEntry{}
-		err := json.Unmarshal(it.Value(), entry)
+		err := msgpack.Unmarshal(it.Value(), entry)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -229,7 +229,7 @@ func (l *levelDBStore) matchWithIndex(match tuplespace.Tuple, limit int) ([]*tup
 			return nil, 0, err
 		}
 		entry := &tuplespace.TupleEntry{}
-		err = json.Unmarshal(value, entry)
+		err = msgpack.Unmarshal(value, entry)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -275,7 +275,7 @@ func makeIndexPrefix(key []byte, l, i int, v interface{}) []byte {
 	key[3] = byte(i)
 	h := fnv.New32()
 	// FIXME: This is probably quite slow :\ benchmark? Alternatives?
-	enc := json.NewEncoder(h)
+	enc := msgpack.NewEncoder(h)
 	enc.Encode(v)
 	binary.LittleEndian.PutUint32(key[4:], h.Sum32())
 	return key[8:]

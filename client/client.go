@@ -2,9 +2,9 @@ package client
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"github.com/alecthomas/tuplespace"
+	"github.com/vmihailenco/msgpack"
 	"net/http"
 	"time"
 )
@@ -42,7 +42,7 @@ func NewTupleSpaceClient(url string) tuplespace.TupleSpace {
 }
 
 func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) error {
-	reqBytes, err := json.Marshal(req)
+	reqBytes, err := msgpack.Marshal(req)
 	if err != nil {
 		return err
 	}
@@ -50,8 +50,8 @@ func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) 
 	if err != nil {
 		return err
 	}
-	hreq.Header["Accept"] = []string{"application/json"}
-	hreq.Header["Content-Type"] = []string{"application/json"}
+	hreq.Header["Accept"] = []string{"application/x-msgpack"}
+	hreq.Header["Content-Type"] = []string{"application/x-msgpack"}
 
 	hresp, err := t.Client.Do(hreq)
 	if hresp != nil && hresp.Body != nil {
@@ -60,7 +60,7 @@ func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) 
 	if err != nil {
 		return err
 	}
-	decoder := json.NewDecoder(hresp.Body)
+	decoder := msgpack.NewDecoder(hresp.Body)
 	if hresp.StatusCode < 200 || hresp.StatusCode > 299 {
 		if hresp.StatusCode == http.StatusGatewayTimeout {
 			return tuplespace.ReaderTimeout

@@ -4,7 +4,6 @@ import (
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
 	"github.com/alecthomas/tuplespace/middleware"
-	"sync/atomic"
 	"time"
 )
 
@@ -22,10 +21,11 @@ func NewMemoryStore() tuplespace.TupleStore {
 }
 
 func (m *memoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
-	log.Info("Putting %d tuples", len(tuples))
+	log.Fine("Putting %d tuples", len(tuples))
 	for _, tuple := range tuples {
+		m.id++
 		entry := &tuplespace.TupleEntry{
-			ID:      atomic.AddUint64(&m.id, 1),
+			ID:      m.id,
 			Tuple:   tuple,
 			Timeout: timeout,
 		}
@@ -39,7 +39,7 @@ func (m *memoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.Tu
 	matches := make([]*tuplespace.TupleEntry, 0, 32)
 	deletes := make([]*tuplespace.TupleEntry, 0, 32)
 
-	log.Info("Matching %s against %d tuples limit %d", match, len(m.tuples), limit)
+	log.Fine("Matching %s against %d tuples limit %d", match, len(m.tuples), limit)
 	for _, entry := range m.tuples {
 		if entry.IsExpired(now) {
 			deletes = append(deletes, entry)
@@ -71,5 +71,5 @@ func (m *memoryStore) Shutdown() {
 }
 
 func (m *memoryStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
-	stats.Tuples = len(m.tuples)
+	stats.Tuples = int64(len(m.tuples))
 }

@@ -1,4 +1,4 @@
-import json
+import msgpack
 
 import requests
 
@@ -6,7 +6,7 @@ import requests
 """A Python interface to http://github.com/alecthomas/tuplespace"""
 
 
-HEADERS = {'Content-type': 'application/json', 'Accept': 'application/json'}
+HEADERS = {'Content-type': 'application/x-msgpack', 'Accept': 'application/x-msgpack'}
 
 
 class Error(Exception):
@@ -96,7 +96,7 @@ class TupleSpace(object):
         return response.data['tuples']
 
     def _req(self, method, path, data, status_codes):
-        encoded = json.dumps(data)
+        encoded = msgpack.dumps(data)
         return _check_response(
             method(self.url + path, data=encoded, headers=HEADERS),
             status_codes,
@@ -113,11 +113,11 @@ class TupleSpace(object):
 
 
 def _check_response(response, status_codes):
-    if response.headers['content-type'] != 'application/json':
-        raise Error('expected application/json response, got %s' % response.headers['content-type'])
+    if response.headers['content-type'] != 'application/x-msgpack':
+        raise Error('expected application/x-msgpack response, got %s' % response.headers['content-type'])
     if response.status_code == 504:
         raise Timeout('tuplespace timeout')
-    response.data = json.loads(response.content)
+    response.data = msgpack.loads(response.content)
     if response.status_code not in status_codes:
         raise Error('unexpected status code %d: %s' % (response.status_code, response.data.get('error', '?')))
     return response

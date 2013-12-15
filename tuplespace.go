@@ -69,6 +69,7 @@ import (
 	log "github.com/alecthomas/log4go"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -197,7 +198,7 @@ func (t *tupleSpaceImpl) updateStats() {
 	defer t.statsUpdated.L.Unlock()
 	t.waitersLock.RLock()
 	defer t.waitersLock.RUnlock()
-	t.stats.Waiters = len(t.waiters)
+	t.stats.Waiters = int64(len(t.waiters))
 	t.store.UpdateStats(&t.stats)
 	t.statsUpdated.Broadcast()
 }
@@ -205,6 +206,8 @@ func (t *tupleSpaceImpl) updateStats() {
 func (t *tupleSpaceImpl) processNewEntries(tuples []Tuple, timeout time.Time) error {
 	t.waitersLock.Lock()
 	defer t.waitersLock.Unlock()
+
+	atomic.AddInt64(&t.stats.TuplesSeen, int64(len(tuples)))
 
 	available := len(tuples)
 
@@ -219,6 +222,9 @@ func (t *tupleSpaceImpl) processNewEntries(tuples []Tuple, timeout time.Time) er
 				if take {
 					tuples[i] = nil
 					available--
+					atomic.AddInt64(&t.stats.TuplesTaken, 1)
+				} else {
+					atomic.AddInt64(&t.stats.TuplesRead, 1)
 				}
 				if one {
 					break
@@ -254,6 +260,10 @@ func (t *tupleSpaceImpl) processNewEntries(tuples []Tuple, timeout time.Time) er
 // we return those tuples. If not, the waiter is added to the list of waiters
 // that will match against future tuples.
 func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
+	t.waitersLock.Lock()
+	defer t.waitersLock.Unlock()
+
+	atomic.AddInt64(&t.stats.WaitersSeen, 1)
 	one := waiter.actions&ActionOne != 0
 	take := waiter.actions&ActionTake != 0
 	limit := 0
@@ -284,12 +294,15 @@ func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
 
 	if len(matches) > 0 {
 		log.Fine("Waiter %s immediately returned %d matching tuples", waiter, len(matches))
+		if len(deletes) != 0 {
+			atomic.AddInt64(&t.stats.TuplesTaken, int64(len(deletes)))
+		} else {
+			atomic.AddInt64(&t.stats.TuplesRead, int64(len(matches)))
+		}
 		waiter.matches <- matches
 	} else {
 		log.Fine("Adding new waiter %s", waiter)
-		t.waitersLock.Lock()
 		t.waiters[waiter] = nil
-		t.waitersLock.Unlock()
 	}
 }
 

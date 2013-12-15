@@ -38,8 +38,12 @@ type TupleStore interface {
 
 // TupleSpaceStats contains statistics on the tuplespace.
 type TupleSpaceStats struct {
-	Waiters int `json:"waiters"`
-	Tuples  int `json:"tuples"`
+	Waiters     int64 `json:"waiters"`      // Number of current waiters.
+	Tuples      int64 `json:"tuples"`       // Number of unexpired tuples.
+	WaitersSeen int64 `json:"waiters_seen"` // Number of waiters seen since service start.
+	TuplesSeen  int64 `json:"tuples_seen"`  // Number of tuples seen since service start.
+	TuplesTaken int64 `json:"tuples_taken"` // Number of tuples taken since service start.
+	TuplesRead  int64 `json:"tuples_read"`  // Number of tuples read since service start.
 }
 
 func (t TupleSpaceStats) String() string {
