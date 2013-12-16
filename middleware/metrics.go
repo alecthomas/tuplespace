@@ -21,7 +21,7 @@ func (t *MetricsMiddleware) Put(tuples []tuplespace.Tuple, timeout time.Time) er
 	return t.store.Put(tuples, timeout)
 }
 
-func (t *MetricsMiddleware) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
+func (t *MetricsMiddleware) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, []*tuplespace.TupleEntry, error) {
 	return t.store.Match(match, limit)
 }
 

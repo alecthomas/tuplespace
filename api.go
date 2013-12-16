@@ -19,15 +19,13 @@ func (t *TupleEntry) IsExpired(now time.Time) bool {
 }
 
 // A TupleStore handles efficient storage and retrieval of tuples.
-//
-// - Implementations MUST purge expired entries.
-// - Implementations MUST be concurrency safe.
+// Implementations MUST be concurrency safe.
 type TupleStore interface {
 	// Put tuples into the store.
 	Put(tuple []Tuple, timeout time.Time) error
-	// Match retrieves tuples from the store that match "match". This MUST NOT
-	// return expired tuples.
-	Match(match Tuple, limit int) ([]*TupleEntry, error)
+	// Match retrieves tuples from the store that match "match".
+	// MAY return expired tuples.
+	Match(match Tuple, limit int) (matches []*TupleEntry, expired []*TupleEntry, err error)
 	// Delete a set of entries in the store.
 	Delete(entries []*TupleEntry) error
 	// Shutdown the store.

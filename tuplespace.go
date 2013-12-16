@@ -270,16 +270,17 @@ func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
 	if one {
 		limit = 1
 	}
-	stored, err := t.store.Match(waiter.match, limit)
+	stored, deletes, err := t.store.Match(waiter.match, limit)
 	if err != nil {
 		waiter.err <- err
 		return
 	}
 	matches := make([]Tuple, 0, len(stored))
-	deletes := []*TupleEntry{}
+	taken := 0
 	for _, entry := range stored {
 		matches = append(matches, entry.Tuple)
 		if take {
+			taken++
 			deletes = append(deletes, entry)
 		}
 		if one {
@@ -288,7 +289,7 @@ func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
 	}
 
 	if len(deletes) > 0 {
-		log.Fine("Deleting %d tuples taken by %s", len(deletes), waiter)
+		log.Fine("Deleting %d tuples. %d taken by %s, %d expired", len(deletes), taken, waiter, len(deletes)-taken)
 		t.store.Delete(deletes)
 	}
 

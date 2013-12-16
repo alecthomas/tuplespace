@@ -118,18 +118,6 @@ func (l *LevelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	return nil
 }
 
-func (l *LevelDBStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
-	entries, deleted, err := l.match(match, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	if deleted > 0 {
-		log.Debug("Purged %d expired tuples from LevelDBStore", deleted)
-	}
-	return entries, nil
-}
-
 func (l *LevelDBStore) Delete(entries []*tuplespace.TupleEntry) error {
 	atomic.AddInt64(&l.tupleCount, -int64(len(entries)))
 	deletes := levigo.NewWriteBatch()
@@ -151,8 +139,7 @@ func (l *LevelDBStore) Shutdown() {
 	l.db.Close()
 }
 
-// Use the index to retrieve matches.
-func (l *LevelDBStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
+func (l *LevelDBStore) Match(match tuplespace.Tuple, limit int) (matches []*tuplespace.TupleEntry, expired []*tuplespace.TupleEntry, err error) {
 	var intersection []uint64
 	ln := len(match)
 	for i, v := range match {
@@ -180,37 +167,31 @@ func (l *LevelDBStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.T
 	}
 
 	// Have IDs from the index, retrieve the entries.
-	// FIXME: This code is almost identical to the code in matchWithIteration.
-	// It should probably be refactored.
 	now := time.Now()
-	deletes := []*tuplespace.TupleEntry{}
-	entries := make([]*tuplespace.TupleEntry, 0, len(intersection))
+	matches = make([]*tuplespace.TupleEntry, 0, len(intersection))
 	for _, id := range intersection {
 		key := keyForID(id)
 		value, err := l.db.Get(l.roptions, key)
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, err
 		}
 		entry := &tuplespace.TupleEntry{}
 		err = msgpack.Unmarshal(value, entry)
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, err
 		}
 		if entry.IsExpired(now) {
-			deletes = append(deletes, entry)
+			expired = append(expired, entry)
 		} else {
 			if match.Match(entry.Tuple) {
-				entries = append(entries, entry)
-				if len(entries) == limit {
+				matches = append(matches, entry)
+				if len(matches) == limit {
 					break
 				}
 			}
 		}
 	}
-	if len(deletes) > 0 {
-		l.Delete(deletes)
-	}
-	return entries, len(deletes), nil
+	return matches, expired, nil
 }
 
 // Retrieve IDs using the indexes.

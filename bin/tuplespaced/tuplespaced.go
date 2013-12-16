@@ -21,7 +21,7 @@ var (
 	ncpuFlag         = pflag.Int("ncpu", runtime.NumCPU(), "number of cpus to use")
 	logLevelFlag     = pflag.String("log-level", "info", "log level (finest, fine, debug, info, warning, error, critical)")
 	storeFlag        = pflag.String("store", "leveldb", "set storage backend (memory, leveldb, gkvlite)")
-	dbFlag           = pflag.String("db", "tuplestore.db", "path to database")
+	dbFlag           = pflag.String("db", "tuplespace.db", "path to database")
 
 	logLevels = map[string]log.Level{
 		"finest":   log.FINEST,

@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
 	"github.com/steveyen/gkvlite"
@@ -26,15 +27,44 @@ type GKVLiteStore struct {
 
 // NewGKVLiteStore creates a new TupleStore backed by gkvlite.
 func NewGKVLiteStore(path string) (*GKVLiteStore, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_SYNC, 0644)
+	log.Info("GKVLiteStore: compacting")
+	// Open old file.
+	oldf, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_SYNC, 0644)
 	if err != nil {
 		return nil, err
 	}
-	db, err := gkvlite.NewStore(f)
+	old, err := gkvlite.NewStore(oldf)
 	if err != nil {
+		oldf.Close()
+		return nil, err
+	}
+	old.SetCollection("data", bytes.Compare)
+	old.SetCollection("index", bytes.Compare)
+
+	f, err := os.OpenFile(path+"~", os.O_CREATE|os.O_RDWR|os.O_SYNC, 0644)
+	if err != nil {
+		old.Close()
+		oldf.Close()
+		return nil, err
+	}
+	db, err := old.CopyTo(f, 0)
+	if err != nil {
+		old.Close()
+		oldf.Close()
+		f.Close()
+		os.Remove(path + "~")
+		return nil, err
+	}
+	old.Close()
+	oldf.Close()
+
+	err = os.Rename(path+"~", path)
+	if err != nil {
+		db.Close()
 		f.Close()
 		return nil, err
 	}
+
 	db.SetCollection("data", bytes.Compare)
 	db.SetCollection("index", bytes.Compare)
 
@@ -102,18 +132,6 @@ func (l *GKVLiteStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	return l.db.Flush()
 }
 
-func (l *GKVLiteStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
-	entries, deleted, err := l.match(match, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	if deleted > 0 {
-		log.Debug("Purged %d expired tuples from GKVLiteStore", deleted)
-	}
-	return entries, nil
-}
-
 func (l *GKVLiteStore) Delete(entries []*tuplespace.TupleEntry) error {
 	l.lock.Lock()
 	defer l.lock.Unlock()
@@ -123,8 +141,9 @@ func (l *GKVLiteStore) Delete(entries []*tuplespace.TupleEntry) error {
 		for _, idx := range indexEntry(entry) {
 			l.idx.Delete(idx)
 		}
-		l.idx.Delete(keyForID(entry.ID))
+		l.data.Delete(keyForID(entry.ID))
 	}
+	fmt.Printf("Deleting %d\n", len(entries))
 	return l.db.Flush()
 }
 
@@ -137,8 +156,7 @@ func (l *GKVLiteStore) Shutdown() {
 	l.f.Close()
 }
 
-// Use the index to retrieve matches.
-func (l *GKVLiteStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
+func (l *GKVLiteStore) Match(match tuplespace.Tuple, limit int) (matches []*tuplespace.TupleEntry, expired []*tuplespace.TupleEntry, err error) {
 	var intersection []uint64
 	ln := len(match)
 	for i, v := range match {
@@ -166,32 +184,28 @@ func (l *GKVLiteStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.T
 
 	// Have IDs from the index, retrieve the entries.
 	now := time.Now()
-	deletes := []*tuplespace.TupleEntry{}
-	entries := make([]*tuplespace.TupleEntry, 0, len(intersection))
+	matches = make([]*tuplespace.TupleEntry, 0, len(intersection))
 	for _, id := range intersection {
 		key := keyForID(id)
 		value, err := l.data.Get(key)
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, err
 		}
 		entry := &tuplespace.TupleEntry{}
 		err = msgpack.Unmarshal(value, entry)
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, err
 		}
 		if entry.IsExpired(now) {
-			deletes = append(deletes, entry)
+			expired = append(expired, entry)
 		} else {
 			if match.Match(entry.Tuple) {
-				entries = append(entries, entry)
-				if len(entries) == limit {
+				matches = append(matches, entry)
+				if len(matches) == limit {
 					break
 				}
 			}
 		}
 	}
-	if len(deletes) > 0 {
-		l.Delete(deletes)
-	}
-	return entries, len(deletes), nil
+	return matches, expired, nil
 }

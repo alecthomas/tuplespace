@@ -5,9 +5,7 @@ import (
 	"errors"
 	"github.com/alecthomas/tuplespace"
 	"github.com/vmihailenco/msgpack"
-	"github.com/youtube/vitess/go/bson"
 	"io"
-	"io/ioutil"
 	"net/http"
 )
 
@@ -15,7 +13,6 @@ var (
 	Serializers = SerializerMap{
 		"application/json":      &JsonSerializer{},
 		"application/x-msgpack": &MsgpackSerializer{},
-		"application/bson":      &BsonSerializer{},
 	}
 	UnsupportedContentType = errors.New("unsupported content type")
 	EmptyRequestBody       = errors.New("empty request body")
@@ -117,39 +114,4 @@ func (j *MsgpackSerializer) NewEncoder(w io.Writer) ContentTypeEncoder {
 
 func (j *MsgpackSerializer) NewDecoder(r io.Reader) ContentTypeDecoder {
 	return &msgpackDecoderAdapter{msgpack.NewDecoder(r)}
-}
-
-type BsonSerializer struct{}
-
-type bsonEncoder struct {
-	w io.Writer
-}
-
-func (b *bsonEncoder) Encode(v interface{}) error {
-	bytes, err := bson.Marshal(v)
-	if err != nil {
-		return err
-	}
-	_, err = b.w.Write(bytes)
-	return err
-}
-
-func (j *BsonSerializer) NewEncoder(w io.Writer) ContentTypeEncoder {
-	return &bsonEncoder{w}
-}
-
-type bsonDecoder struct {
-	r io.Reader
-}
-
-func (b *bsonDecoder) Decode(v interface{}) error {
-	bytes, err := ioutil.ReadAll(b.r)
-	if err != nil {
-		return err
-	}
-	return bson.Unmarshal(bytes, v)
-}
-
-func (j *BsonSerializer) NewDecoder(r io.Reader) ContentTypeDecoder {
-	return &bsonDecoder{r}
 }

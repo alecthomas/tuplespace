@@ -35,7 +35,7 @@ func (m *MemoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	return nil
 }
 
-func (m *MemoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
+func (m *MemoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, []*tuplespace.TupleEntry, error) {
 	now := time.Now()
 	matches := make([]*tuplespace.TupleEntry, 0, 32)
 	deletes := make([]*tuplespace.TupleEntry, 0, 32)
@@ -57,7 +57,7 @@ func (m *MemoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.Tu
 	if len(deletes) > 0 {
 		m.Delete(deletes)
 	}
-	return matches, nil
+	return matches, nil, nil
 }
 
 func (m *MemoryStore) Delete(entries []*tuplespace.TupleEntry) error {
