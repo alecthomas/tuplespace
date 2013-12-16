@@ -23,7 +23,7 @@ var (
 	writeTimeoutFlag = pflag.Duration("write_timeout", 30*time.Second, "HTTP server write timeout")
 	ncpuFlag         = pflag.Int("ncpu", runtime.NumCPU(), "number of cpus to use")
 	logLevelFlag     = pflag.String("log-level", "info", "log level (finest, fine, debug, info, warning, error, critical)")
-	storeFlag        = pflag.String("store", "leveldb", "set storage backend (memory, leveldb)")
+	storeFlag        = pflag.String("store", "leveldb", "set storage backend (memory, leveldb, gkvlite)")
 	dbFlag           = pflag.String("db", "tuplestore.db", "path to database")
 	profileFlag      = pflag.String("profile", "", "enable profiling to file")
 
@@ -40,6 +40,7 @@ var (
 	stores = map[string]func() (tuplespace.TupleStore, error){
 		"memory":  func() (tuplespace.TupleStore, error) { return store.NewMemoryStore(), nil },
 		"leveldb": func() (tuplespace.TupleStore, error) { return store.NewLevelDBStore(*dbFlag) },
+		"gkvlite": func() (tuplespace.TupleStore, error) { return store.NewGKVLiteStore(*dbFlag) },
 	}
 )
 

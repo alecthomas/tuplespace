@@ -85,6 +85,7 @@ func (l *levelDBStore) initState() {
 
 func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	wb := levigo.NewWriteBatch()
+	empty := []byte{}
 	var entryKey []byte
 
 	for _, tuple := range tuples {
@@ -107,7 +108,9 @@ func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 		atomic.AddInt64(&l.tupleCount, 1)
 
 		// Write index
-		indexEntry(wb, entry)
+		for _, idx := range indexEntry(entry) {
+			wb.Put(idx, empty)
+		}
 	}
 
 	l.db.Write(l.woptions, wb)
@@ -115,7 +118,7 @@ func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 }
 
 func (l *levelDBStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
-	entries, deleted, err := l.heuristicMatch(match, limit)
+	entries, deleted, err := l.match(match, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -149,56 +152,8 @@ func (l *levelDBStore) Shutdown() {
 	l.db.Close()
 }
 
-func (l *levelDBStore) heuristicMatch(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
-	c := atomic.LoadInt64(&l.tupleCount)
-	if c > 10000 {
-		return l.matchWithIndex(match, limit)
-	}
-	return l.matchWithIteration(match, limit)
-}
-
-// Iterate over the entire e: prefix key-space looking for matching entries.
-func (l *levelDBStore) matchWithIteration(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
-	now := time.Now()
-	deletes := levigo.NewWriteBatch()
-	defer deletes.Close()
-	deleted := 0
-	entries := make([]*tuplespace.TupleEntry, 0, 32)
-	it := l.db.NewIterator(l.itoptions)
-	defer it.Close()
-	for it.Seek(entryPrefix); it.Valid(); it.Next() {
-		if err := it.GetError(); err != nil {
-			return nil, 0, err
-		}
-		if bytes.Compare(entryPrefix, it.Key()[:len(entryPrefix)]) != 0 {
-			break
-		}
-		entry := &tuplespace.TupleEntry{}
-		err := msgpack.Unmarshal(it.Value(), entry)
-		if err != nil {
-			return nil, 0, err
-		}
-		if entry.IsExpired(now) {
-			deletes.Delete(keyForID(entry.ID))
-			deleted++
-		} else {
-			if match.Match(entry.Tuple) {
-				entries = append(entries, entry)
-				if len(entries) == limit {
-					break
-				}
-			}
-		}
-	}
-
-	if deleted > 0 {
-		l.db.Write(l.woptions, deletes)
-	}
-	return entries, deleted, nil
-}
-
 // Use the index to retrieve matches.
-func (l *levelDBStore) matchWithIndex(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
+func (l *levelDBStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
 	var intersection []uint64
 	ln := len(match)
 	for i, v := range match {
@@ -261,12 +216,14 @@ func (l *levelDBStore) matchWithIndex(match tuplespace.Tuple, limit int) ([]*tup
 
 // Retrieve IDs using the indexes.
 // Index keys are in the form "i:<tuple-length><tuple-field-index><tuple-field-hash>".
-func indexEntry(batch *levigo.WriteBatch, entry *tuplespace.TupleEntry) {
+func indexEntry(entry *tuplespace.TupleEntry) [][]byte {
+	indexes := [][]byte{}
 	l := len(entry.Tuple)
 	for i, v := range entry.Tuple {
 		key := indexKey(entry.ID, l, i, v)
-		batch.Put(key, []byte{})
+		indexes = append(indexes, key)
 	}
+	return indexes
 }
 
 func indexKey(id uint64, l, i int, v interface{}) []byte {

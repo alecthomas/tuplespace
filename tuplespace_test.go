@@ -7,6 +7,7 @@ import (
 	"github.com/stretchrcom/testify/assert"
 	"io/ioutil"
 	"os"
+	"path"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,6 +27,11 @@ func sendN(ts tuplespace.TupleSpace, n int, timeout time.Duration) {
 	ts.SendMany(tuples, timeout)
 }
 
+func newTupleSpace() (s tuplespace.TupleSpace, dir string) {
+	// return newGKVLiteTupleStore()
+	return newLevelDBTupleSpace()
+}
+
 func newLevelDBTupleSpace() (s tuplespace.TupleSpace, dir string) {
 	dir, err := ioutil.TempDir("", "tuplespace_test.")
 	if err != nil {
@@ -39,8 +45,21 @@ func newLevelDBTupleSpace() (s tuplespace.TupleSpace, dir string) {
 	return
 }
 
+func newGKVLiteTupleStore() (s tuplespace.TupleSpace, dir string) {
+	dir, err := ioutil.TempDir("", "tuplespace_test.")
+	if err != nil {
+		panic(err.Error())
+	}
+	st, err := store.NewGKVLiteStore(path.Join(dir, "gkvlite.db"))
+	if err != nil {
+		panic(err.Error())
+	}
+	s = tuplespace.NewTupleSpace(st)
+	return
+}
+
 func TestTupleSpaceRead(t *testing.T) {
-	ts, dir := newLevelDBTupleSpace()
+	ts, dir := newTupleSpace()
 	defer ts.Shutdown()
 	defer os.RemoveAll(dir)
 	ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, 0)
@@ -51,7 +70,7 @@ func TestTupleSpaceRead(t *testing.T) {
 }
 
 func TestTupleSpaceReadAll(t *testing.T) {
-	ts, dir := newLevelDBTupleSpace()
+	ts, dir := newTupleSpace()
 	defer ts.Shutdown()
 	defer os.RemoveAll(dir)
 	ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, 0)
@@ -64,7 +83,7 @@ func TestTupleSpaceReadAll(t *testing.T) {
 }
 
 func TestTupleSpaceTake(t *testing.T) {
-	ts, dir := newLevelDBTupleSpace()
+	ts, dir := newTupleSpace()
 	defer ts.Shutdown()
 	defer os.RemoveAll(dir)
 	ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, 0)
@@ -75,7 +94,7 @@ func TestTupleSpaceTake(t *testing.T) {
 }
 
 func TestTupleSpaceTakeAll(t *testing.T) {
-	ts, dir := newLevelDBTupleSpace()
+	ts, dir := newTupleSpace()
 	defer ts.Shutdown()
 	defer os.RemoveAll(dir)
 	ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, 0)
@@ -146,7 +165,7 @@ func TestTupleSpaceStressTestSendTake(t *testing.T) {
 }
 
 func BenchmarkTupleSpaceSend(b *testing.B) {
-	ts, dir := newLevelDBTupleSpace()
+	ts, dir := newTupleSpace()
 	defer ts.Shutdown()
 	defer os.RemoveAll(dir)
 	b.ResetTimer()
@@ -156,14 +175,15 @@ func BenchmarkTupleSpaceSend(b *testing.B) {
 }
 
 func BenchmarkTupleSpaceRead(b *testing.B) {
-	ts, dir := newLevelDBTupleSpace()
+	// ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
+	ts, dir := newTupleSpace()
 	defer ts.Shutdown()
 	defer os.RemoveAll(dir)
 	sendN(ts, b.N, 0)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		match := tuplespace.Tuple{"cmd", int64(i)}
-		_, err := ts.Read(match, time.Second)
+		_, err := ts.Read(match, 0)
 		if err != nil {
 			panic(err.Error())
 		}
@@ -171,7 +191,7 @@ func BenchmarkTupleSpaceRead(b *testing.B) {
 }
 
 func BenchmarkTupleSpaceReadAll100(b *testing.B) {
-	ts, dir := newLevelDBTupleSpace()
+	ts, dir := newTupleSpace()
 	defer ts.Shutdown()
 	defer os.RemoveAll(dir)
 	sendN(ts, 100, 0)
@@ -182,7 +202,7 @@ func BenchmarkTupleSpaceReadAll100(b *testing.B) {
 }
 
 func BenchmarkTupleSpaceReadAll1000(b *testing.B) {
-	ts, dir := newLevelDBTupleSpace()
+	ts, dir := newTupleSpace()
 	defer ts.Shutdown()
 	defer os.RemoveAll(dir)
 	sendN(ts, 1000, 0)
@@ -193,7 +213,7 @@ func BenchmarkTupleSpaceReadAll1000(b *testing.B) {
 }
 
 func BenchmarkTupleSpaceTake(b *testing.B) {
-	ts, dir := newLevelDBTupleSpace()
+	ts, dir := newTupleSpace()
 	defer ts.Shutdown()
 	defer os.RemoveAll(dir)
 	sendN(ts, b.N, 0)
