@@ -10,7 +10,9 @@ import (
 	"github.com/ogier/pflag"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
+	"runtime/pprof"
 	"time"
 )
 
@@ -23,6 +25,7 @@ var (
 	logLevelFlag     = pflag.String("log-level", "info", "log level (finest, fine, debug, info, warning, error, critical)")
 	storeFlag        = pflag.String("store", "leveldb", "set storage backend (memory, leveldb)")
 	dbFlag           = pflag.String("db", "tuplestore.db", "path to database")
+	profileFlag      = pflag.String("profile", "", "enable profiling to file")
 
 	logLevels = map[string]log.Level{
 		"finest":   log.FINEST,
@@ -64,7 +67,6 @@ func Take(ts tuplespace.RawTupleSpace, resp server.ResponseSerializer, req tuple
 }
 
 func takeOrRead(take bool, ts tuplespace.RawTupleSpace, resp server.ResponseSerializer, req tuplespace.ReadRequest, w http.ResponseWriter) {
-
 	var tuples []tuplespace.Tuple
 	var err error
 
@@ -130,6 +132,27 @@ Flags:
 	}
 	pflag.Parse()
 	runtime.GOMAXPROCS(*ncpuFlag)
+
+	if *profileFlag != "" {
+		log.Info("Writing profile to %s", *profileFlag)
+		f, err := os.Create(*profileFlag)
+		if err != nil {
+			fatalf("failed to create profile:%s", err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		go func() {
+			for _ = range c {
+				log.Info("Shutting down")
+				pprof.StopCPUProfile()
+				os.Exit(1)
+			}
+		}()
+
+	}
 
 	log.AddFilter("stdout", logLevels[*logLevelFlag], log.NewConsoleLogWriter())
 	debug := logLevels[*logLevelFlag] <= log.DEBUG

@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
 	"github.com/jmhodges/levigo"
@@ -114,7 +115,7 @@ func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 }
 
 func (l *levelDBStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
-	entries, deleted, err := l.matchWithIteration(match, limit)
+	entries, deleted, err := l.heuristicMatch(match, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +147,14 @@ func (l *levelDBStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
 
 func (l *levelDBStore) Shutdown() {
 	l.db.Close()
+}
+
+func (l *levelDBStore) heuristicMatch(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
+	c := atomic.LoadInt64(&l.tupleCount)
+	if c > 10000 {
+		return l.matchWithIndex(match, limit)
+	}
+	return l.matchWithIteration(match, limit)
 }
 
 // Iterate over the entire e: prefix key-space looking for matching entries.
@@ -206,7 +215,7 @@ func (l *levelDBStore) matchWithIndex(match tuplespace.Tuple, limit int) ([]*tup
 			if bytes.Compare(key[:8], prefix) != 0 {
 				break
 			}
-			hits = append(hits, binary.LittleEndian.Uint64(key[8:]))
+			hits = append(hits, binary.BigEndian.Uint64(key[8:]))
 		}
 
 		if intersection == nil {
@@ -263,7 +272,7 @@ func indexEntry(batch *levigo.WriteBatch, entry *tuplespace.TupleEntry) {
 func indexKey(id uint64, l, i int, v interface{}) []byte {
 	key := make([]byte, 16)
 	idb := makeIndexPrefix(key, l, i, v)
-	binary.LittleEndian.PutUint64(idb, id)
+	binary.BigEndian.PutUint64(idb, id)
 	return key
 }
 
@@ -275,9 +284,9 @@ func makeIndexPrefix(key []byte, l, i int, v interface{}) []byte {
 	key[3] = byte(i)
 	h := fnv.New32()
 	// FIXME: This is probably quite slow :\ benchmark? Alternatives?
-	enc := msgpack.NewEncoder(h)
+	enc := json.NewEncoder(h)
 	enc.Encode(v)
-	binary.LittleEndian.PutUint32(key[4:], h.Sum32())
+	binary.BigEndian.PutUint32(key[4:], h.Sum32())
 	return key[8:]
 }
 
@@ -286,12 +295,12 @@ func keyForID(id uint64) []byte {
 	pl := len(entryPrefix)
 	entryKey := make([]byte, pl+8)
 	copy(entryKey, entryPrefix)
-	binary.LittleEndian.PutUint64(entryKey[pl:], id)
+	binary.BigEndian.PutUint64(entryKey[pl:], id)
 	return entryKey
 }
 
 func idFromKey(key []byte) uint64 {
-	return binary.LittleEndian.Uint64(key[len(entryPrefix):])
+	return binary.BigEndian.Uint64(key[len(entryPrefix):])
 }
 
 func intersect(s, u []uint64) []uint64 {

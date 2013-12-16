@@ -24,6 +24,12 @@ func TestTupleTypeComparisonFails(t *testing.T) {
 	assert.False(t, match.Match(tuple))
 }
 
+func TestTupleComparisonTypes(t *testing.T) {
+	tuple := tuplespace.Tuple{"cmd", int64(1)}
+	match := tuplespace.Tuple{"cmd", float64(1.5)}
+	assert.True(t, match.Match(tuple))
+}
+
 func BenchmarkTupleComparison(b *testing.B) {
 	tuple := tuplespace.Tuple{10, "hello", "goodbye", 1.5}
 	match := tuplespace.Tuple{10, nil, "goodbye", "love"}
