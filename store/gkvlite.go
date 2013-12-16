@@ -3,7 +3,6 @@ package store
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
 	"github.com/steveyen/gkvlite"
@@ -143,7 +142,6 @@ func (l *GKVLiteStore) Delete(entries []*tuplespace.TupleEntry) error {
 		}
 		l.data.Delete(keyForID(entry.ID))
 	}
-	fmt.Printf("Deleting %d\n", len(entries))
 	return l.db.Flush()
 }
 
