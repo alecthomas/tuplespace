@@ -13,17 +13,19 @@ import (
 	"time"
 )
 
-type gkvliteStore struct {
+// GKVLiteStore is a TupleStore backed by https://github.com/steveyen/gkvlite
+type GKVLiteStore struct {
 	lock       sync.Mutex
 	id         uint64 // Only updated via atomic ops
 	tupleCount int64  // Only updated via atomic ops
 	f          *os.File
 	db         *gkvlite.Store
-	c          *gkvlite.Collection
+	data       *gkvlite.Collection
+	idx        *gkvlite.Collection
 }
 
 // NewGKVLiteStore creates a new TupleStore backed by gkvlite.
-func NewGKVLiteStore(path string) (tuplespace.TupleStore, error) {
+func NewGKVLiteStore(path string) (*GKVLiteStore, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_SYNC, 0644)
 	if err != nil {
 		return nil, err
@@ -33,13 +35,14 @@ func NewGKVLiteStore(path string) (tuplespace.TupleStore, error) {
 		f.Close()
 		return nil, err
 	}
-	db.SetCollection("tuplespace", bytes.Compare)
-	c := db.GetCollection("tuplespace")
+	db.SetCollection("data", bytes.Compare)
+	db.SetCollection("index", bytes.Compare)
 
-	l := &gkvliteStore{
-		f:  f,
-		db: db,
-		c:  c,
+	l := &GKVLiteStore{
+		f:    f,
+		db:   db,
+		data: db.GetCollection("data"),
+		idx:  db.GetCollection("index"),
 	}
 
 	log.Info("GKVLiteStore: loading state")
@@ -49,8 +52,8 @@ func NewGKVLiteStore(path string) (tuplespace.TupleStore, error) {
 	return l, nil
 }
 
-func (l *gkvliteStore) initState() {
-	l.c.VisitItemsAscend(entryPrefix, false, func(it *gkvlite.Item) bool {
+func (l *GKVLiteStore) initState() {
+	l.data.VisitItemsAscend(entryPrefix, false, func(it *gkvlite.Item) bool {
 		if bytes.Compare(entryPrefix, it.Key[:len(entryPrefix)]) != 0 {
 			return false
 		}
@@ -63,7 +66,7 @@ func (l *gkvliteStore) initState() {
 	})
 }
 
-func (l *gkvliteStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (l *GKVLiteStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
@@ -87,57 +90,55 @@ func (l *gkvliteStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 			return err
 		}
 		// Write update
-		l.c.Set(entryKey, value)
+		l.data.Set(entryKey, value)
 		atomic.AddInt64(&l.tupleCount, 1)
 
 		// Write index
 		for _, idx := range indexEntry(entry) {
-			l.c.Set(idx, empty)
+			l.idx.Set(idx, empty)
 		}
 	}
 
 	return l.db.Flush()
 }
 
-func (l *gkvliteStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
+func (l *GKVLiteStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
 	entries, deleted, err := l.match(match, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	if deleted > 0 {
-		atomic.AddInt64(&l.tupleCount, -int64(deleted))
-		log.Debug("Purged %d expired tuples from gkvliteStore", deleted)
+		log.Debug("Purged %d expired tuples from GKVLiteStore", deleted)
 	}
 	return entries, nil
 }
 
-func (l *gkvliteStore) Delete(entries []*tuplespace.TupleEntry) error {
+func (l *GKVLiteStore) Delete(entries []*tuplespace.TupleEntry) error {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
 	atomic.AddInt64(&l.tupleCount, -int64(len(entries)))
 	for _, entry := range entries {
-		ln := len(entry.Tuple)
-		for i, v := range entry.Tuple {
-			l.c.Delete(indexKey(entry.ID, ln, i, v))
+		for _, idx := range indexEntry(entry) {
+			l.idx.Delete(idx)
 		}
-		l.c.Delete(keyForID(entry.ID))
+		l.idx.Delete(keyForID(entry.ID))
 	}
 	return l.db.Flush()
 }
 
-func (l *gkvliteStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
+func (l *GKVLiteStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
 	stats.Tuples = atomic.LoadInt64(&l.tupleCount)
 }
 
-func (l *gkvliteStore) Shutdown() {
+func (l *GKVLiteStore) Shutdown() {
 	l.db.Close()
 	l.f.Close()
 }
 
 // Use the index to retrieve matches.
-func (l *gkvliteStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
+func (l *GKVLiteStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
 	var intersection []uint64
 	ln := len(match)
 	for i, v := range match {
@@ -148,7 +149,7 @@ func (l *gkvliteStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.T
 		prefix := make([]byte, 8)
 		makeIndexPrefix(prefix, ln, i, v)
 
-		l.c.VisitItemsAscend(prefix, false, func(it *gkvlite.Item) bool {
+		l.idx.VisitItemsAscend(prefix, false, func(it *gkvlite.Item) bool {
 			if bytes.Compare(it.Key[:8], prefix) != 0 {
 				return false
 			}
@@ -164,14 +165,12 @@ func (l *gkvliteStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.T
 	}
 
 	// Have IDs from the index, retrieve the entries.
-	// FIXME: This code is almost identical to the code in matchWithIteration.
-	// It should probably be refactored.
 	now := time.Now()
 	deletes := []*tuplespace.TupleEntry{}
 	entries := make([]*tuplespace.TupleEntry, 0, len(intersection))
 	for _, id := range intersection {
 		key := keyForID(id)
-		value, err := l.c.Get(key)
+		value, err := l.data.Get(key)
 		if err != nil {
 			return nil, 0, err
 		}

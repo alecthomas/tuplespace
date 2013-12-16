@@ -7,20 +7,21 @@ import (
 	"time"
 )
 
-type memoryStore struct {
+// MemoryStore is an in-memory implementation of a TupleStore. It is mostly useful for testing.
+type MemoryStore struct {
 	id     uint64
 	tuples map[uint64]*tuplespace.TupleEntry
 }
 
 // NewMemoryStore creates a new in-memory tuple store.
 func NewMemoryStore() tuplespace.TupleStore {
-	store := &memoryStore{
+	store := &MemoryStore{
 		tuples: make(map[uint64]*tuplespace.TupleEntry),
 	}
 	return middleware.NewLockingMiddleware(store)
 }
 
-func (m *memoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (m *MemoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	log.Fine("Putting %d tuples", len(tuples))
 	for _, tuple := range tuples {
 		m.id++
@@ -34,7 +35,7 @@ func (m *memoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	return nil
 }
 
-func (m *memoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
+func (m *MemoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
 	now := time.Now()
 	matches := make([]*tuplespace.TupleEntry, 0, 32)
 	deletes := make([]*tuplespace.TupleEntry, 0, 32)
@@ -59,7 +60,7 @@ func (m *memoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.Tu
 	return matches, nil
 }
 
-func (m *memoryStore) Delete(entries []*tuplespace.TupleEntry) error {
+func (m *MemoryStore) Delete(entries []*tuplespace.TupleEntry) error {
 	log.Finest("Deleting %d tuples", len(entries))
 	for _, entry := range entries {
 		delete(m.tuples, entry.ID)
@@ -67,9 +68,9 @@ func (m *memoryStore) Delete(entries []*tuplespace.TupleEntry) error {
 	return nil
 }
 
-func (m *memoryStore) Shutdown() {
+func (m *MemoryStore) Shutdown() {
 }
 
-func (m *memoryStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
+func (m *MemoryStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
 	stats.Tuples = int64(len(m.tuples))
 }

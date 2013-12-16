@@ -6,43 +6,43 @@ import (
 	"time"
 )
 
-type lockingMiddleware struct {
+type LockingMiddleware struct {
 	lock  sync.Mutex
 	store tuplespace.TupleStore
 }
 
 // NewLockingMiddleware wraps an existing store in a Mutex.
-func NewLockingMiddleware(store tuplespace.TupleStore) tuplespace.TupleStore {
-	return &lockingMiddleware{
+func NewLockingMiddleware(store tuplespace.TupleStore) *LockingMiddleware {
+	return &LockingMiddleware{
 		store: store,
 	}
 }
 
-func (l *lockingMiddleware) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (l *LockingMiddleware) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	return l.store.Put(tuples, timeout)
 }
 
-func (l *lockingMiddleware) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
+func (l *LockingMiddleware) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	return l.store.Match(match, limit)
 }
 
-func (l *lockingMiddleware) Delete(entries []*tuplespace.TupleEntry) error {
+func (l *LockingMiddleware) Delete(entries []*tuplespace.TupleEntry) error {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	return l.store.Delete(entries)
 }
 
-func (l *lockingMiddleware) Shutdown() {
+func (l *LockingMiddleware) Shutdown() {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	l.store.Shutdown()
 }
 
-func (l *lockingMiddleware) UpdateStats(stats *tuplespace.TupleSpaceStats) {
+func (l *LockingMiddleware) UpdateStats(stats *tuplespace.TupleSpaceStats) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	l.store.UpdateStats(stats)

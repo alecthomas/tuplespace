@@ -1,18 +1,21 @@
 # A RESTful tuple space server [![Build Status](https://travis-ci.org/alecthomas/tuplespace.png)](https://travis-ci.org/alecthomas/tuplespace)
 
-
 This is an implementation of a [tuple space](http://www.mcs.anl.gov/~itf/dbpp/text/node44.html) as a RESTful HTTP service.
 
 The tuple space uses [LevelDB](https://code.google.com/p/leveldb/) Go [bindings](https://github.com/jmhodges/levigo) for persistence.
+
+NOTE: This is beta software.
 
 ## Features
 
 Includes an in-process tuple space implementation for Go (eg. `tuplespace.NewTupleSpace(store.NewMemoryStore())`).
 
+Includes a LevelDB storage backend.
+
 A RESTful tuple space server:
 
 ```bash
-$ tuplespaced &
+$ tuplespaced --store=leveldb --db=tuplestore.db &
 $ curl -X POST -H "Content-Type: application/json" -d '{"tuples": [["cmd", "uname -a"]]}' -i http://localhost:2619/tuplespace/`
 ```
 

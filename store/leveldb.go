@@ -18,7 +18,8 @@ var (
 	indexPrefix = []byte("i:")
 )
 
-type levelDBStore struct {
+// LevelDBStore is a TupleStore backed by LevelDB C bindings.
+type LevelDBStore struct {
 	id         uint64 // Only updated via atomic ops
 	tupleCount int64  // Only updated via atomic ops
 	db         *levigo.DB
@@ -28,7 +29,7 @@ type levelDBStore struct {
 }
 
 // NewLevelDBStore creates a new TupleStore backed by LevelDB.
-func NewLevelDBStore(path string) (tuplespace.TupleStore, error) {
+func NewLevelDBStore(path string) (*LevelDBStore, error) {
 	options := levigo.NewOptions()
 	options.SetEnv(levigo.NewDefaultEnv())
 	options.SetCreateIfMissing(true)
@@ -55,7 +56,7 @@ func NewLevelDBStore(path string) (tuplespace.TupleStore, error) {
 	log.Info("LevelDBStore: compacting")
 	db.CompactRange(levigo.Range{Start: nil, Limit: nil})
 
-	l := &levelDBStore{
+	l := &LevelDBStore{
 		db:        db,
 		roptions:  roptions,
 		itoptions: itoptions,
@@ -69,7 +70,7 @@ func NewLevelDBStore(path string) (tuplespace.TupleStore, error) {
 	return l, nil
 }
 
-func (l *levelDBStore) initState() {
+func (l *LevelDBStore) initState() {
 	it := l.db.NewIterator(l.roptions)
 	for it.Seek(entryPrefix); it.Valid(); it.Next() {
 		if bytes.Compare(entryPrefix, it.Key()[:len(entryPrefix)]) != 0 {
@@ -83,7 +84,7 @@ func (l *levelDBStore) initState() {
 	}
 }
 
-func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (l *LevelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	wb := levigo.NewWriteBatch()
 	empty := []byte{}
 	var entryKey []byte
@@ -117,26 +118,24 @@ func (l *levelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	return nil
 }
 
-func (l *levelDBStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
+func (l *LevelDBStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, error) {
 	entries, deleted, err := l.match(match, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	if deleted > 0 {
-		atomic.AddInt64(&l.tupleCount, -int64(deleted))
-		log.Debug("Purged %d expired tuples from levelDBStore", deleted)
+		log.Debug("Purged %d expired tuples from LevelDBStore", deleted)
 	}
 	return entries, nil
 }
 
-func (l *levelDBStore) Delete(entries []*tuplespace.TupleEntry) error {
+func (l *LevelDBStore) Delete(entries []*tuplespace.TupleEntry) error {
 	atomic.AddInt64(&l.tupleCount, -int64(len(entries)))
 	deletes := levigo.NewWriteBatch()
 	for _, entry := range entries {
-		l := len(entry.Tuple)
-		for i, v := range entry.Tuple {
-			deletes.Delete(indexKey(entry.ID, l, i, v))
+		for _, idx := range indexEntry(entry) {
+			deletes.Delete(idx)
 		}
 		deletes.Delete(keyForID(entry.ID))
 	}
@@ -144,16 +143,16 @@ func (l *levelDBStore) Delete(entries []*tuplespace.TupleEntry) error {
 	return nil
 }
 
-func (l *levelDBStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
+func (l *LevelDBStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
 	stats.Tuples = atomic.LoadInt64(&l.tupleCount)
 }
 
-func (l *levelDBStore) Shutdown() {
+func (l *LevelDBStore) Shutdown() {
 	l.db.Close()
 }
 
 // Use the index to retrieve matches.
-func (l *levelDBStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
+func (l *LevelDBStore) match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, int, error) {
 	var intersection []uint64
 	ln := len(match)
 	for i, v := range match {
