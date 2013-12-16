@@ -32,10 +32,10 @@ func NewTemporaryDiskStore(builder TupleStoreBuilder) tuplespace.TupleStore {
 }
 
 func (t *TemporaryDiskStore) Shutdown() {
+	t.TupleStore.Shutdown()
 	if t.dir != "" {
 		os.RemoveAll(t.dir)
 	}
-	t.TupleStore.Shutdown()
 }
 
 func BuildLevelDBStore(dir string) tuplespace.TupleStore {

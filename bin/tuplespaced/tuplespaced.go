@@ -10,9 +10,7 @@ import (
 	"github.com/ogier/pflag"
 	"net/http"
 	"os"
-	"os/signal"
 	"runtime"
-	"runtime/pprof"
 	"time"
 )
 
