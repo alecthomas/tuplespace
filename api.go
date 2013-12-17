@@ -22,7 +22,7 @@ func (t *TupleEntry) IsExpired(now time.Time) bool {
 // Implementations MUST be concurrency safe.
 type TupleStore interface {
 	// Put tuples into the store.
-	Put(tuple []Tuple, timeout time.Time) error
+	Put(tuple []Tuple, timeout time.Time) ([]*TupleEntry, error)
 	// Match retrieves tuples from the store that match "match".
 	// MAY return expired tuples.
 	Match(match Tuple, limit int) (matches []*TupleEntry, expired []*TupleEntry, err error)

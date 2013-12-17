@@ -1,3 +1,4 @@
+// Package client is a Go client for the RESTful TupleSpace service.
 package client
 
 import (

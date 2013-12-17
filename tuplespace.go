@@ -253,7 +253,8 @@ func (t *tupleSpaceImpl) processNewEntries(tuples []Tuple, timeout time.Time) er
 	}
 
 	// Finally, store the remaining tuples.
-	return t.store.Put(remaining, timeout)
+	_, err := t.store.Put(remaining, timeout)
+	return err
 }
 
 // When a new waiter arrives, we check if it matches existing tuples. If so,
@@ -275,6 +276,7 @@ func (t *tupleSpaceImpl) processNewWaiter(waiter *tupleWaiter) {
 		waiter.err <- err
 		return
 	}
+
 	matches := make([]Tuple, 0, len(stored))
 	taken := 0
 	for _, entry := range stored {

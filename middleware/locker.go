@@ -18,7 +18,7 @@ func NewLockingMiddleware(store tuplespace.TupleStore) *LockingMiddleware {
 	}
 }
 
-func (l *LockingMiddleware) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (l *LockingMiddleware) Put(tuples []tuplespace.Tuple, timeout time.Time) ([]*tuplespace.TupleEntry, error) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	return l.store.Put(tuples, timeout)

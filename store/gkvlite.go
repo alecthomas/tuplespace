@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	log "github.com/alecthomas/log4go"
 	"github.com/alecthomas/tuplespace"
 	"github.com/steveyen/gkvlite"
@@ -95,13 +96,14 @@ func (l *GKVLiteStore) initState() {
 	})
 }
 
-func (l *GKVLiteStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (l *GKVLiteStore) Put(tuples []tuplespace.Tuple, timeout time.Time) ([]*tuplespace.TupleEntry, error) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
 	var entryKey []byte
 	empty := []byte{}
 
+	entries := make([]*tuplespace.TupleEntry, 0, len(tuples))
 	for _, tuple := range tuples {
 		// Update ID
 		id := atomic.AddUint64(&l.id, 1)
@@ -113,10 +115,11 @@ func (l *GKVLiteStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 			Tuple:   tuple,
 			Timeout: timeout,
 		}
+		entries = append(entries, entry)
 		value, err := msgpack.Marshal(entry)
 		if err != nil {
 			l.db.FlushRevert()
-			return err
+			return nil, err
 		}
 		// Write update
 		l.data.Set(entryKey, value)
@@ -128,7 +131,7 @@ func (l *GKVLiteStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 		}
 	}
 
-	return l.db.Flush()
+	return entries, l.db.Flush()
 }
 
 func (l *GKVLiteStore) Delete(entries []*tuplespace.TupleEntry) error {
@@ -152,6 +155,37 @@ func (l *GKVLiteStore) UpdateStats(stats *tuplespace.TupleSpaceStats) {
 func (l *GKVLiteStore) Shutdown() {
 	l.db.Close()
 	l.f.Close()
+}
+
+type IntevalTimer struct {
+	name       string
+	cumulative time.Duration
+	count      int
+	current    time.Time
+}
+
+func NewIntervalTimer(name string) *IntevalTimer {
+	return &IntevalTimer{
+		name: name,
+	}
+}
+
+func (i *IntevalTimer) Reset() {
+	i.cumulative = 0
+	i.count = 0
+}
+
+func (i *IntevalTimer) Start() {
+	i.current = time.Now()
+}
+
+func (i *IntevalTimer) End() {
+	i.cumulative += time.Now().Sub(i.current)
+	i.count++
+}
+
+func (i *IntevalTimer) String() string {
+	return fmt.Sprintf("timer.%s(cumulative=%s, average=%s)", i.name, i.cumulative, i.cumulative/time.Duration(i.count))
 }
 
 func (l *GKVLiteStore) Match(match tuplespace.Tuple, limit int) (matches []*tuplespace.TupleEntry, expired []*tuplespace.TupleEntry, err error) {

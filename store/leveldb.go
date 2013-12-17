@@ -84,11 +84,12 @@ func (l *LevelDBStore) initState() {
 	}
 }
 
-func (l *LevelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (l *LevelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) ([]*tuplespace.TupleEntry, error) {
 	wb := levigo.NewWriteBatch()
 	empty := []byte{}
 	var entryKey []byte
 
+	entries := make([]*tuplespace.TupleEntry, 0, len(tuples))
 	for _, tuple := range tuples {
 		// Update ID
 		id := atomic.AddUint64(&l.id, 1)
@@ -100,9 +101,10 @@ func (l *LevelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 			Tuple:   tuple,
 			Timeout: timeout,
 		}
+		entries = append(entries, entry)
 		value, err := msgpack.Marshal(entry)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		// Write update
 		wb.Put(entryKey, value)
@@ -115,7 +117,7 @@ func (l *LevelDBStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 	}
 
 	l.db.Write(l.woptions, wb)
-	return nil
+	return entries, nil
 }
 
 func (l *LevelDBStore) Delete(entries []*tuplespace.TupleEntry) error {

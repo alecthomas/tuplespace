@@ -115,10 +115,11 @@ func benchmarkTupleSpaceRead(b *testing.B, builder TupleStoreBuilder) {
 	ts := tuplespace.NewTupleSpace(NewTemporaryDiskStore(builder))
 	defer ts.Shutdown()
 	sendN(ts, b.N, 0)
+	sendN(ts, b.N, 0)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		match := tuplespace.Tuple{"cmd", int64(i)}
-		_, err := ts.Read(match, 0)
+		_, err := ts.ReadAll(match, 0)
 		if err != nil {
 			panic(err.Error())
 		}

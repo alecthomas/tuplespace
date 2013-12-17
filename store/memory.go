@@ -21,8 +21,9 @@ func NewMemoryStore() tuplespace.TupleStore {
 	return middleware.NewLockingMiddleware(store)
 }
 
-func (m *MemoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
+func (m *MemoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) ([]*tuplespace.TupleEntry, error) {
 	log.Fine("Putting %d tuples", len(tuples))
+	entries := make([]*tuplespace.TupleEntry, 0, len(tuples))
 	for _, tuple := range tuples {
 		m.id++
 		entry := &tuplespace.TupleEntry{
@@ -30,9 +31,10 @@ func (m *MemoryStore) Put(tuples []tuplespace.Tuple, timeout time.Time) error {
 			Tuple:   tuple,
 			Timeout: timeout,
 		}
+		entries = append(entries, entry)
 		m.tuples[entry.ID] = entry
 	}
-	return nil
+	return entries, nil
 }
 
 func (m *MemoryStore) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, []*tuplespace.TupleEntry, error) {
