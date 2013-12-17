@@ -6,7 +6,6 @@ import (
 	"github.com/alecthomas/tuplespace/store"
 	"io/ioutil"
 	"os"
-	"path"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -46,14 +45,6 @@ func BuildLevelDBStore(dir string) tuplespace.TupleStore {
 	return s
 }
 
-func BuildGKVLiteStore(dir string) tuplespace.TupleStore {
-	s, err := store.NewGKVLiteStore(path.Join(dir, "gkvlite.db"))
-	if err != nil {
-		panic(err.Error())
-	}
-	return s
-}
-
 func BuildMemoryStore(dir string) tuplespace.TupleStore {
 	return store.NewMemoryStore()
 }
@@ -70,20 +61,6 @@ func BenchmarkTupleSpaceLevelDBReadAll1000(b *testing.B) {
 func BenchmarkTupleSpaceLevelDBTake(b *testing.B) { benchmarkTupleSpaceTake(b, BuildLevelDBStore) }
 func BenchmarkTupleSpaceLevelDBConcurrency32(b *testing.B) {
 	benchmarkTupleSpaceStressTestConcurrency32(b, BuildLevelDBStore)
-}
-
-// GKVLite benchmarks.
-func BenchmarkTupleSpaceGKVLiteSend(b *testing.B) { benchmarkTupleSpaceSend(b, BuildGKVLiteStore) }
-func BenchmarkTupleSpaceGKVLiteRead(b *testing.B) { benchmarkTupleSpaceRead(b, BuildGKVLiteStore) }
-func BenchmarkTupleSpaceGKVLiteReadAll100(b *testing.B) {
-	benchmarkTupleSpaceReadAll100(b, BuildGKVLiteStore)
-}
-func BenchmarkTupleSpaceGKVLiteReadAll1000(b *testing.B) {
-	benchmarkTupleSpaceReadAll1000(b, BuildGKVLiteStore)
-}
-func BenchmarkTupleSpaceGKVLiteTake(b *testing.B) { benchmarkTupleSpaceTake(b, BuildGKVLiteStore) }
-func BenchmarkTupleSpaceGKVLiteConcurrency32(b *testing.B) {
-	benchmarkTupleSpaceStressTestConcurrency32(b, BuildGKVLiteStore)
 }
 
 // Memory benchmarks.

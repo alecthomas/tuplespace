@@ -7,7 +7,6 @@ import (
 	"github.com/stretchrcom/testify/assert"
 	"io/ioutil"
 	"os"
-	"path"
 	"testing"
 	"time"
 )
@@ -26,7 +25,6 @@ func sendN(ts tuplespace.TupleSpace, n int, timeout time.Duration) {
 }
 
 func newTupleSpace() (s tuplespace.TupleSpace, dir string) {
-	// return newGKVLiteTupleStore()
 	return newLevelDBTupleSpace()
 }
 
@@ -36,19 +34,6 @@ func newLevelDBTupleSpace() (s tuplespace.TupleSpace, dir string) {
 		panic(err.Error())
 	}
 	st, err := store.NewLevelDBStore(dir)
-	if err != nil {
-		panic(err.Error())
-	}
-	s = tuplespace.NewTupleSpace(st)
-	return
-}
-
-func newGKVLiteTupleStore() (s tuplespace.TupleSpace, dir string) {
-	dir, err := ioutil.TempDir("", "tuplespace_test.")
-	if err != nil {
-		panic(err.Error())
-	}
-	st, err := store.NewGKVLiteStore(path.Join(dir, "gkvlite.db"))
 	if err != nil {
 		panic(err.Error())
 	}

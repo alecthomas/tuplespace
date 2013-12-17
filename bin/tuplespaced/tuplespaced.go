@@ -36,7 +36,6 @@ var (
 	stores = map[string]func() (tuplespace.TupleStore, error){
 		"memory":  func() (tuplespace.TupleStore, error) { return store.NewMemoryStore(), nil },
 		"leveldb": func() (tuplespace.TupleStore, error) { return store.NewLevelDBStore(*dbFlag) },
-		"gkvlite": func() (tuplespace.TupleStore, error) { return store.NewGKVLiteStore(*dbFlag) },
 	}
 )
 
