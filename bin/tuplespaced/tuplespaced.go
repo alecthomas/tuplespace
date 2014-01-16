@@ -37,7 +37,12 @@ func fatalf(f string, args ...interface{}) {
 	os.Exit(1)
 }
 
-func Send(ts tuplespace.RawTupleSpace, r *http.Request, req tuplespace.SendRequest, resp server.ResponseSerializer) {
+type SendRequest struct {
+	Tuples  []tuplespace.Tuple `json:"tuples"`
+	Timeout time.Duration      `json:"timeout"`
+}
+
+func Send(ts tuplespace.RawTupleSpace, r *http.Request, req SendRequest, resp server.ResponseSerializer) {
 	err := ts.SendMany(req.Tuples, req.Timeout)
 
 	if err != nil {
@@ -91,7 +96,7 @@ func takeOrRead(take bool, ts tuplespace.RawTupleSpace, resp server.ResponseSeri
 		}
 		resp.Error(status, err)
 	} else {
-		resp.Serialize(http.StatusOK, &tuplespace.ReadResponse{Tuples: tuples})
+		resp.Serialize(http.StatusOK, tuples)
 	}
 }
 
@@ -106,7 +111,7 @@ func makeService(ts tuplespace.RawTupleSpace, debug bool) *martini.Martini {
 	m.MapTo(ts, (*tuplespace.RawTupleSpace)(nil))
 
 	r := martini.NewRouter()
-	r.Post("/tuplespace/", server.DeserializerMiddleware(tuplespace.SendRequest{}), Send)
+	r.Post("/tuplespace/", server.DeserializerMiddleware(SendRequest{}), Send)
 	r.Get("/tuplespace/", server.DeserializerMiddleware(tuplespace.ReadRequest{}), Read)
 	r.Delete("/tuplespace/", server.DeserializerMiddleware(tuplespace.ReadRequest{}), Take)
 

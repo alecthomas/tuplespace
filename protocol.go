@@ -9,7 +9,7 @@ type ErrorResponse struct {
 }
 
 type SendRequest struct {
-	Tuples  []Tuple       `json:"tuples"`
+	Tuples  interface{}   `json:"tuples"`
 	Timeout time.Duration `json:"timeout"`
 }
 
@@ -17,13 +17,11 @@ type SendResponse struct{}
 
 // A ReadRequest sent as JSON from a client.
 type ReadRequest struct {
-	Match string `json:"match"`
-	// Timeout for read request. Defaults to a very large period of time indeed.
-	Timeout time.Duration `json:"timeout"`
-	// Read all tuples.
-	All bool `json:"all"`
+	Match   string        `json:"match"`   // Match expression.
+	Timeout time.Duration `json:"timeout"` // Timeout for read request. Defaults to a very large period of time indeed.
+	All     bool          `json:"all"`     // Read all tuples.
 }
 
 type ReadResponse struct {
-	Tuples []Tuple `json:"tuples"`
+	Tuples interface{} `json:"tuples"`
 }

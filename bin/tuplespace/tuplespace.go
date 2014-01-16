@@ -83,13 +83,13 @@ Examples:
 
 	case "read", "take":
 		match := tuplespace.MustMatch(pflag.Arg(1))
-		var tuple tuplespace.Tuple
+		tuple := map[string]interface{}{}
 		var err error
 		switch command {
 		case "read":
-			tuple, err = c.Read(match, timeout)
+			err = c.Read(match, timeout, tuple)
 		case "take":
-			tuple, err = c.Take(match, timeout)
+			err = c.Take(match, timeout, tuple)
 		}
 		if err != nil {
 			fatalf("failed to read tuple: %s", err)
@@ -100,13 +100,13 @@ Examples:
 
 	case "readall", "takeall":
 		match := tuplespace.MustMatch(pflag.Arg(1))
-		var tuples []tuplespace.Tuple
+		tuples := []map[string]interface{}{}
 		var err error
 		switch command {
 		case "readall":
-			tuples, err = c.ReadAll(match, timeout)
+			err = c.ReadAll(match, timeout, &tuples)
 		case "takeall":
-			tuples, err = c.TakeAll(match, timeout)
+			err = c.TakeAll(match, timeout, &tuples)
 		}
 		if err != nil {
 			fatalf("failed to read tuples: %s", err)

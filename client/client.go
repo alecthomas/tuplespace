@@ -10,51 +10,33 @@ import (
 	"time"
 )
 
-type clientReadOperationHandle struct {
-	tuples chan []tuplespace.Tuple
-	err    chan error
-	cancel chan bool
-}
-
-func (c *clientReadOperationHandle) Cancel() {
-	c.cancel <- true
-}
-
-func (c *clientReadOperationHandle) Get() chan []tuplespace.Tuple {
-	return c.tuples
-}
-
-func (c *clientReadOperationHandle) Error() chan error {
-	return c.err
-}
-
-type tupleSpaceClient struct {
-	URL    string
-	Client *http.Client
+// TupleSpaceClient is the a Go client for the tuplespace service.
+type TupleSpaceClient struct {
+	url    string
+	client *http.Client
 }
 
 // NewTupleSpaceClient creates a new client for the service at url.
-func NewTupleSpaceClient(url string) tuplespace.TupleSpace {
-	c := &tupleSpaceClient{
-		URL:    url,
-		Client: &http.Client{},
+func NewTupleSpaceClient(url string) *TupleSpaceClient {
+	return &TupleSpaceClient{
+		url:    url,
+		client: &http.Client{},
 	}
-	return tuplespace.NewTupleSpaceHelper(c)
 }
 
-func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) error {
+func (t *TupleSpaceClient) do(method string, req interface{}, resp interface{}) error {
 	reqBytes, err := msgpack.Marshal(req)
 	if err != nil {
 		return err
 	}
-	hreq, err := http.NewRequest(method, t.URL, bytes.NewReader(reqBytes))
+	hreq, err := http.NewRequest(method, t.url, bytes.NewReader(reqBytes))
 	if err != nil {
 		return err
 	}
 	hreq.Header["Accept"] = []string{"application/x-msgpack"}
 	hreq.Header["Content-Type"] = []string{"application/x-msgpack"}
 
-	hresp, err := t.Client.Do(hreq)
+	hresp, err := t.client.Do(hreq)
 	if hresp != nil && hresp.Body != nil {
 		defer hresp.Body.Close()
 	}
@@ -77,21 +59,7 @@ func (t *tupleSpaceClient) do(method string, req interface{}, resp interface{}) 
 	return decoder.Decode(resp)
 }
 
-func (t *tupleSpaceClient) SendMany(tuples []tuplespace.Tuple, timeout time.Duration) error {
-	req := &tuplespace.SendRequest{
-		Tuples:  tuples,
-		Timeout: timeout,
-	}
-	resp := &tuplespace.SendResponse{}
-	return t.do("POST", req, resp)
-}
-
-func (t *tupleSpaceClient) ReadOperation(match *tuplespace.TupleMatcher, timeout time.Duration, actions int) tuplespace.ReadOperationHandle {
-	handle := &clientReadOperationHandle{
-		tuples: make(chan []tuplespace.Tuple, 1),
-		err:    make(chan error, 1),
-		cancel: make(chan bool, 1),
-	}
+func (t *TupleSpaceClient) read(match *tuplespace.TupleMatcher, timeout time.Duration, actions int, out interface{}) error {
 	method := "GET"
 	if actions&tuplespace.ActionTake != 0 {
 		method = "DELETE"
@@ -101,20 +69,63 @@ func (t *tupleSpaceClient) ReadOperation(match *tuplespace.TupleMatcher, timeout
 		Timeout: timeout,
 	}
 	req.All = actions&tuplespace.ActionOne == 0
-	resp := &tuplespace.ReadResponse{}
-	err := t.do(method, req, resp)
-	if err != nil {
-		handle.err <- err
-	} else {
-		handle.tuples <- resp.Tuples
+	return t.do(method, req, out)
+}
+
+// Send a single tuple into the tuplespace, with an optional timeout.
+// NOTE: SendMany() has much higher throughput than Send().
+func (t *TupleSpaceClient) Send(tuple interface{}, timeout time.Duration) error {
+	return t.SendMany([]interface{}{tuple}, timeout)
+}
+
+// SendMany tuples into the tuplespace. The "tuples" argument must be an array
+// of values.
+func (t *TupleSpaceClient) SendMany(tuples interface{}, timeout time.Duration) error {
+	req := &tuplespace.SendRequest{
+		Tuples:  tuples,
+		Timeout: timeout,
 	}
-	return handle
+	resp := &tuplespace.SendResponse{}
+	return t.do("POST", req, resp)
 }
 
-func (t *tupleSpaceClient) Shutdown() error {
-	return nil
+// Read a tuple from the tuplespace, with an optional timeout.
+func (t *TupleSpaceClient) Read(match string, timeout time.Duration, tuple interface{}) error {
+	m, err := tuplespace.Match(match)
+	if err != nil {
+		return err
+	}
+	out := []interface{}{tuple}
+	return t.read(m, timeout, tuplespace.ActionOne, &out)
 }
 
-func (t *tupleSpaceClient) Stats() tuplespace.TupleSpaceStats {
-	return tuplespace.TupleSpaceStats{}
+// ReadAll matching tuples from the tuplespace. The "tuples" argument must be
+// an array of values.
+func (t *TupleSpaceClient) ReadAll(match string, timeout time.Duration, tuples interface{}) error {
+	m, err := tuplespace.Match(match)
+	if err != nil {
+		return err
+	}
+	return t.read(m, timeout, 0, tuples)
+}
+
+// Take (read and remove) a tuple from the tuplespace, with an optional
+// timeout.
+func (t *TupleSpaceClient) Take(match string, timeout time.Duration, tuple interface{}) error {
+	m, err := tuplespace.Match(match)
+	if err != nil {
+		return err
+	}
+	out := []interface{}{tuple}
+	return t.read(m, timeout, tuplespace.ActionOne|tuplespace.ActionTake, &out)
+}
+
+// TakeAll (read and remove) tuples from the tuplespace, with an optional
+// timeout. The "tuples" argument must be an array of values.
+func (t *TupleSpaceClient) TakeAll(match string, timeout time.Duration, tuples interface{}) error {
+	m, err := tuplespace.Match(match)
+	if err != nil {
+		return err
+	}
+	return t.read(m, timeout, tuplespace.ActionTake, tuples)
 }
