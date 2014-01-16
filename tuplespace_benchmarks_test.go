@@ -37,30 +37,8 @@ func (t *TemporaryDiskStore) Shutdown() {
 	}
 }
 
-func BuildLevelDBStore(dir string) tuplespace.TupleStore {
-	s, err := store.NewLevelDBStore(dir)
-	if err != nil {
-		panic(err.Error())
-	}
-	return s
-}
-
 func BuildMemoryStore(dir string) tuplespace.TupleStore {
 	return store.NewMemoryStore()
-}
-
-// Benchmark LevelDB
-func BenchmarkTupleSpaceLevelDBSend(b *testing.B) { benchmarkTupleSpaceSend(b, BuildLevelDBStore) }
-func BenchmarkTupleSpaceLevelDBRead(b *testing.B) { benchmarkTupleSpaceRead(b, BuildLevelDBStore) }
-func BenchmarkTupleSpaceLevelDBReadAll100(b *testing.B) {
-	benchmarkTupleSpaceReadAll100(b, BuildLevelDBStore)
-}
-func BenchmarkTupleSpaceLevelDBReadAll1000(b *testing.B) {
-	benchmarkTupleSpaceReadAll1000(b, BuildLevelDBStore)
-}
-func BenchmarkTupleSpaceLevelDBTake(b *testing.B) { benchmarkTupleSpaceTake(b, BuildLevelDBStore) }
-func BenchmarkTupleSpaceLevelDBConcurrency32(b *testing.B) {
-	benchmarkTupleSpaceStressTestConcurrency32(b, BuildLevelDBStore)
 }
 
 // Memory benchmarks.
@@ -83,20 +61,19 @@ func benchmarkTupleSpaceSend(b *testing.B, builder TupleStoreBuilder) {
 	defer ts.Shutdown()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ts.Send(tuplespace.Tuple{"cmd", "uname -a"}, 0)
+		ts.Send(tuplespace.Tuple{"cmd": "uname -a"}, 0)
 	}
 }
 
 func benchmarkTupleSpaceRead(b *testing.B, builder TupleStoreBuilder) {
-	// ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
 	ts := tuplespace.NewTupleSpace(NewTemporaryDiskStore(builder))
 	defer ts.Shutdown()
 	sendN(ts, b.N, 0)
 	sendN(ts, b.N, 0)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		match := tuplespace.Tuple{"cmd", int64(i)}
-		_, err := ts.ReadAll(match, 0)
+		match := tuplespace.MustMatch(`cmd == %d`, int64(i))
+		_, err := ts.Read(match, 0)
 		if err != nil {
 			panic(err.Error())
 		}
@@ -108,8 +85,9 @@ func benchmarkTupleSpaceReadAll100(b *testing.B, builder TupleStoreBuilder) {
 	defer ts.Shutdown()
 	sendN(ts, 100, 0)
 	b.ResetTimer()
+	match := tuplespace.MustMatch(`cmd != nil`)
 	for i := 0; i < b.N; i++ {
-		ts.ReadAll(tuplespace.Tuple{"cmd", nil}, 0)
+		ts.ReadAll(match, 0)
 	}
 }
 
@@ -118,8 +96,9 @@ func benchmarkTupleSpaceReadAll1000(b *testing.B, builder TupleStoreBuilder) {
 	defer ts.Shutdown()
 	sendN(ts, 1000, 0)
 	b.ResetTimer()
+	match := tuplespace.MustMatch(`cmd != nil`)
 	for i := 0; i < b.N; i++ {
-		ts.ReadAll(tuplespace.Tuple{"cmd", nil}, 0)
+		ts.ReadAll(match, 0)
 	}
 }
 
@@ -129,7 +108,8 @@ func benchmarkTupleSpaceTake(b *testing.B, builder TupleStoreBuilder) {
 	sendN(ts, b.N, 0)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ts.Take(tuplespace.Tuple{"cmd", i}, 0)
+		match := tuplespace.MustMatch(`cmd == %d`, i)
+		ts.Take(match, 0)
 	}
 }
 
@@ -148,7 +128,7 @@ func benchmarkTupleSpaceStressTestConcurrency32(b *testing.B, builder TupleStore
 		readWait.Add(1)
 		go func(i int) {
 			for n := 0; n < messages; n++ {
-				match := tuplespace.Tuple{"reader", int64(i), int64(n)}
+				match := tuplespace.MustMatch(`"a" == "reader" && "b" == %d && "c" == %d`, i, n)
 				_, err := ts.Take(match, time.Minute)
 				if err != nil {
 					fmt.Errorf("failed to take: %s", err)
@@ -165,7 +145,7 @@ func benchmarkTupleSpaceStressTestConcurrency32(b *testing.B, builder TupleStore
 		writeWait.Add(1)
 		go func(i int) {
 			for n := 0; n < messages; n++ {
-				tuple := tuplespace.Tuple{"reader", int64(i), int64(n)}
+				tuple := tuplespace.Tuple{"a": "reader", "b": int64(i), "c": int64(n)}
 				err := ts.Send(tuple, 0)
 				if err != nil {
 					fmt.Errorf("failed to take: %s", err)

@@ -25,7 +25,7 @@ type TupleStore interface {
 	Put(tuple []Tuple, timeout time.Time) ([]*TupleEntry, error)
 	// Match retrieves tuples from the store that match "match".
 	// MAY return expired tuples.
-	Match(match Tuple, limit int) (matches []*TupleEntry, expired []*TupleEntry, err error)
+	Match(match *TupleMatcher, limit int) (matches []*TupleEntry, expired []*TupleEntry, err error)
 	// Delete a set of entries in the store.
 	Delete(entries []*TupleEntry) error
 	// Shutdown the store.
@@ -79,14 +79,14 @@ type RawTupleSpace interface {
 	//
 	// Generally used like so:
 	//
-	// 		handle := ts.ReadOperation([]Tuple{"cmd", nil}, 0, ActionTake|ActionOne)
+	// 		handle := ts.ReadOperation(MustMatch(`"cmd" != nil`, 0, ActionTake|ActionOne)
 	// 		select {
 	// 			case tuples := <-handle.Get():
 	// 				...
 	// 			case err := <-handle.Error():
 	// 				...
 	// 		}
-	ReadOperation(match Tuple, timeout time.Duration, actions int) ReadOperationHandle
+	ReadOperation(match *TupleMatcher, timeout time.Duration, actions int) ReadOperationHandle
 
 	// Shutdown the tuplespace.
 	Shutdown() error
@@ -103,16 +103,16 @@ type TupleSpaceHelper interface {
 	Send(tuple Tuple, timeout time.Duration) error
 
 	// Read a tuple from the tuplespace, with an optional timeout.
-	Read(match Tuple, timeout time.Duration) (Tuple, error)
+	Read(match *TupleMatcher, timeout time.Duration) (Tuple, error)
 
 	// Read all matching tuples from the tuplespace.
-	ReadAll(match Tuple, timeout time.Duration) ([]Tuple, error)
+	ReadAll(match *TupleMatcher, timeout time.Duration) ([]Tuple, error)
 
 	// Take (read and remove) a tuple from the tuplespace, with an optional timeout.
-	Take(match Tuple, timeout time.Duration) (Tuple, error)
+	Take(match *TupleMatcher, timeout time.Duration) (Tuple, error)
 
 	// Take (read and remove) all tuples from the tuplespace, with an optional timeout.
-	TakeAll(match Tuple, timeout time.Duration) ([]Tuple, error)
+	TakeAll(match *TupleMatcher, timeout time.Duration) ([]Tuple, error)
 }
 
 // A TupleSpace provides a shared space for delivering and receiving tuples.

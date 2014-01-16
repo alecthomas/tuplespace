@@ -82,7 +82,7 @@ Examples:
 		}
 
 	case "read", "take":
-		match := parseTuple(pflag.Arg(1))
+		match := tuplespace.MustMatch(pflag.Arg(1))
 		var tuple tuplespace.Tuple
 		var err error
 		switch command {
@@ -99,7 +99,7 @@ Examples:
 		}
 
 	case "readall", "takeall":
-		match := parseTuple(pflag.Arg(1))
+		match := tuplespace.MustMatch(pflag.Arg(1))
 		var tuples []tuplespace.Tuple
 		var err error
 		switch command {

@@ -86,7 +86,7 @@ func (t *tupleSpaceClient) SendMany(tuples []tuplespace.Tuple, timeout time.Dura
 	return t.do("POST", req, resp)
 }
 
-func (t *tupleSpaceClient) ReadOperation(match tuplespace.Tuple, timeout time.Duration, actions int) tuplespace.ReadOperationHandle {
+func (t *tupleSpaceClient) ReadOperation(match *tuplespace.TupleMatcher, timeout time.Duration, actions int) tuplespace.ReadOperationHandle {
 	handle := &clientReadOperationHandle{
 		tuples: make(chan []tuplespace.Tuple, 1),
 		err:    make(chan error, 1),
@@ -97,7 +97,7 @@ func (t *tupleSpaceClient) ReadOperation(match tuplespace.Tuple, timeout time.Du
 		method = "DELETE"
 	}
 	req := &tuplespace.ReadRequest{
-		Match:   match,
+		Match:   match.String(),
 		Timeout: timeout,
 	}
 	req.All = actions&tuplespace.ActionOne == 0

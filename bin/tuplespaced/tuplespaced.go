@@ -20,8 +20,6 @@ var (
 	writeTimeoutFlag = pflag.Duration("write_timeout", 30*time.Second, "HTTP server write timeout")
 	ncpuFlag         = pflag.Int("ncpu", runtime.NumCPU(), "number of cpus to use")
 	logLevelFlag     = pflag.String("log-level", "info", "log level (finest, fine, debug, info, warning, error, critical)")
-	storeFlag        = pflag.String("store", "leveldb", "set storage backend (memory, leveldb, gkvlite)")
-	dbFlag           = pflag.String("db", "tuplespace.db", "path to database")
 
 	logLevels = map[string]log.Level{
 		"finest":   log.FINEST,
@@ -31,11 +29,6 @@ var (
 		"warning":  log.WARNING,
 		"error":    log.ERROR,
 		"critical": log.CRITICAL,
-	}
-
-	stores = map[string]func() (tuplespace.TupleStore, error){
-		"memory":  func() (tuplespace.TupleStore, error) { return store.NewMemoryStore(), nil },
-		"leveldb": func() (tuplespace.TupleStore, error) { return store.NewLevelDBStore(*dbFlag) },
 	}
 )
 
@@ -74,7 +67,12 @@ func takeOrRead(take bool, ts tuplespace.RawTupleSpace, resp server.ResponseSeri
 		actions |= tuplespace.ActionOne
 	}
 
-	handle := ts.ReadOperation(req.Match, req.Timeout, actions)
+	match, err := tuplespace.Match(req.Match)
+	if err != nil {
+		resp.Error(http.StatusBadRequest, err)
+		return
+	}
+	handle := ts.ReadOperation(match, req.Timeout, actions)
 
 	select {
 	case <-w.(http.CloseNotifier).CloseNotify():
@@ -134,11 +132,7 @@ Flags:
 
 	log.Info("Starting server on http://%s/tuplespace/", *bindFlag)
 
-	store, err := stores[*storeFlag]()
-	if err != nil {
-		fatalf("failed to initialise store %s: %s", *storeFlag, err.Error())
-	}
-	ts := tuplespace.NewTupleSpace(store)
+	ts := tuplespace.NewTupleSpace(store.NewMemoryStore())
 
 	srv := &http.Server{
 		Addr:         *bindFlag,
@@ -146,7 +140,7 @@ Flags:
 		ReadTimeout:  *readTimeoutFlag,
 		WriteTimeout: *writeTimeoutFlag,
 	}
-	err = srv.ListenAndServe()
+	err := srv.ListenAndServe()
 	if err != nil {
 		fatalf("error: %s\n", err)
 	}

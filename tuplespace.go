@@ -76,7 +76,7 @@ import (
 type tupleVisitor func(tuple Tuple) int
 
 type tupleWaiter struct {
-	match   Tuple
+	match   *TupleMatcher
 	matches chan []Tuple
 	timeout time.Time
 	actions int
@@ -120,7 +120,7 @@ func (t *tupleWaiter) Error() chan error {
 	return t.err
 }
 
-func newWaiter(cancel chan *tupleWaiter, match Tuple, timeout time.Duration, actions int) *tupleWaiter {
+func newWaiter(cancel chan *tupleWaiter, match *TupleMatcher, timeout time.Duration, actions int) *tupleWaiter {
 	var expires time.Time
 	if timeout != 0 {
 		expires = time.Now().Add(timeout)
@@ -336,7 +336,7 @@ func (t *tupleSpaceImpl) SendMany(tuples []Tuple, timeout time.Duration) error {
 	return t.processNewEntries(tuples, expires)
 }
 
-func (t *tupleSpaceImpl) ReadOperation(match Tuple, timeout time.Duration, actions int) ReadOperationHandle {
+func (t *tupleSpaceImpl) ReadOperation(match *TupleMatcher, timeout time.Duration, actions int) ReadOperationHandle {
 	waiter := newWaiter(t.cancel, match, timeout, actions)
 	log.Debug("ReadOperation(%s)", waiter)
 	t.processNewWaiter(waiter)

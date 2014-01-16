@@ -17,7 +17,7 @@ type SendResponse struct{}
 
 // A ReadRequest sent as JSON from a client.
 type ReadRequest struct {
-	Match Tuple `json:"match"`
+	Match string `json:"match"`
 	// Timeout for read request. Defaults to a very large period of time indeed.
 	Timeout time.Duration `json:"timeout"`
 	// Read all tuples.

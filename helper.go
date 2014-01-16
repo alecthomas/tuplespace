@@ -23,7 +23,7 @@ func (t *tupleSpaceHelper) SendMany(tuples []Tuple, timeout time.Duration) error
 	return t.ts.SendMany(tuples, timeout)
 }
 
-func (t *tupleSpaceHelper) ReadOperation(match Tuple, timeout time.Duration, actions int) ReadOperationHandle {
+func (t *tupleSpaceHelper) ReadOperation(match *TupleMatcher, timeout time.Duration, actions int) ReadOperationHandle {
 	return t.ts.ReadOperation(match, timeout, actions)
 }
 
@@ -39,7 +39,7 @@ func (t *tupleSpaceHelper) Send(tuple Tuple, timeout time.Duration) error {
 	return t.ts.SendMany([]Tuple{tuple}, timeout)
 }
 
-func (t *tupleSpaceHelper) Read(match Tuple, timeout time.Duration) (r Tuple, err error) {
+func (t *tupleSpaceHelper) Read(match *TupleMatcher, timeout time.Duration) (r Tuple, err error) {
 	waiter := t.ts.ReadOperation(match, timeout, ActionOne)
 	select {
 	case err = <-waiter.Error():
@@ -50,7 +50,7 @@ func (t *tupleSpaceHelper) Read(match Tuple, timeout time.Duration) (r Tuple, er
 	}
 }
 
-func (t *tupleSpaceHelper) ReadAll(match Tuple, timeout time.Duration) (r []Tuple, err error) {
+func (t *tupleSpaceHelper) ReadAll(match *TupleMatcher, timeout time.Duration) (r []Tuple, err error) {
 	waiter := t.ts.ReadOperation(match, timeout, 0)
 	select {
 	case err = <-waiter.Error():
@@ -60,7 +60,7 @@ func (t *tupleSpaceHelper) ReadAll(match Tuple, timeout time.Duration) (r []Tupl
 	}
 }
 
-func (t *tupleSpaceHelper) Take(match Tuple, timeout time.Duration) (r Tuple, err error) {
+func (t *tupleSpaceHelper) Take(match *TupleMatcher, timeout time.Duration) (r Tuple, err error) {
 	waiter := t.ts.ReadOperation(match, timeout, ActionOne|ActionTake)
 	select {
 	case err = <-waiter.Error():
@@ -71,7 +71,7 @@ func (t *tupleSpaceHelper) Take(match Tuple, timeout time.Duration) (r Tuple, er
 	}
 }
 
-func (t *tupleSpaceHelper) TakeAll(match Tuple, timeout time.Duration) (r []Tuple, err error) {
+func (t *tupleSpaceHelper) TakeAll(match *TupleMatcher, timeout time.Duration) (r []Tuple, err error) {
 	waiter := t.ts.ReadOperation(match, timeout, ActionTake)
 	select {
 	case err = <-waiter.Error():

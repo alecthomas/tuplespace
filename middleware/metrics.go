@@ -49,7 +49,7 @@ func (t *TimingMiddleware) Put(tuples []tuplespace.Tuple, timeout time.Time) ([]
 	return t.store.Put(tuples, timeout)
 }
 
-func (t *TimingMiddleware) Match(match tuplespace.Tuple, limit int) ([]*tuplespace.TupleEntry, []*tuplespace.TupleEntry, error) {
+func (t *TimingMiddleware) Match(match *tuplespace.TupleMatcher, limit int) ([]*tuplespace.TupleEntry, []*tuplespace.TupleEntry, error) {
 	t.match.Start()
 	defer t.match.End()
 	return t.store.Match(match, limit)
