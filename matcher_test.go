@@ -27,6 +27,11 @@ func TestMatchShortCircuit(t *testing.T) {
 	assert.True(t, MustMatch(`true || false`).Match(tuple))
 }
 
+func TestMatchMap(t *testing.T) {
+	tuple := Tuple{"Foo": map[string]interface{}{"Bar": "Waz"}}
+	assert.True(t, MustMatch(`Foo.Bar == "Waz"`).Match(tuple))
+}
+
 func BenchmarkTupleMatching(b *testing.B) {
 	tuple := Tuple{"I": 5}
 	m := MustMatch("I == 5 || I == 3")

@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"reflect"
 	"strconv"
 )
 
@@ -98,7 +99,7 @@ func normalize(n string, v interface{}) interface{} {
 	case string:
 		return v
 	}
-	panic(fmt.Sprintf("context variable %s has unsupported type %v", n, v))
+	return v
 }
 
 func index(expr ast.Node, out []string) []string {
@@ -116,7 +117,7 @@ func index(expr ast.Node, out []string) []string {
 	return out
 }
 
-func eval(tuple Tuple, expr ast.Node) interface{} {
+func eval(tuple map[string]interface{}, expr ast.Node) interface{} {
 	switch n := expr.(type) {
 	case *ast.BinaryExpr:
 		ll := eval(tuple, n.X)
@@ -304,7 +305,11 @@ func eval(tuple Tuple, expr ast.Node) interface{} {
 				return l >= r
 			}
 		default:
-			panic(fmt.Sprintf("unsupported type %#v", n.X))
+			kind := reflect.TypeOf(ll).Kind()
+			if kind == reflect.Map {
+				return ll
+			}
+			panic(fmt.Sprintf("unsupported type %#v", ll))
 		}
 		panic(fmt.Sprintf("unsupported expression %v %s %v", ll, n.Op, rr))
 	case *ast.BasicLit:
@@ -345,6 +350,14 @@ func eval(tuple Tuple, expr ast.Node) interface{} {
 			return false
 		}
 		return nil
+	case *ast.SelectorExpr:
+		v := eval(tuple, n.X)
+		if m, ok := v.(map[string]interface{}); ok {
+			if v, ok := m[n.Sel.Name]; ok {
+				return v
+			}
+		}
+		panic(fmt.Sprintf("unknown attribute \"%s\" on %#v", n.Sel.Name, v))
 	}
 	panic(fmt.Sprintf("unsupported expression node %#v", expr))
 }
