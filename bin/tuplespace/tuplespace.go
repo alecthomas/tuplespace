@@ -82,7 +82,7 @@ Examples:
 		}
 
 	case "read", "take":
-		match := tuplespace.MustMatch(pflag.Arg(1))
+		match := pflag.Arg(1)
 		tuple := map[string]interface{}{}
 		var err error
 		switch command {
@@ -99,7 +99,7 @@ Examples:
 		}
 
 	case "readall", "takeall":
-		match := tuplespace.MustMatch(pflag.Arg(1))
+		match := pflag.Arg(1)
 		tuples := []map[string]interface{}{}
 		var err error
 		switch command {
