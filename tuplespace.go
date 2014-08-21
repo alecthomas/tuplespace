@@ -13,7 +13,7 @@ const (
 )
 
 var (
-	ErrTimeout = errors.New("no match")
+	ErrTimeout = errors.New("timeout")
 )
 
 type Tuple map[string]interface{}
@@ -146,8 +146,16 @@ func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) error {
 
 // SendWithAcknowledgement sends a tuple and waits for it to be ack at least once.
 func (t *TupleSpace) SendWithAcknowledgement(tuple Tuple, expires time.Duration) error {
+	timeout := time.After(expires)
 	entry := t.sendTuple(tuple, expires, true)
-	return <-entry.ack
+	select {
+	case <-timeout:
+		// FIXME: There's a race here. The tuple may still be consumed in the
+		// space after this timeout.
+		return ErrTimeout
+	case err := <-entry.ack:
+		return err
+	}
 }
 
 func (t *TupleSpace) sendTuple(tuple Tuple, expires time.Duration, ack bool) *tupleEntry {
@@ -164,7 +172,7 @@ func (t *TupleSpace) sendTuple(tuple Tuple, expires time.Duration, ack bool) *tu
 		ack:     ackch,
 	}
 	if t.waiters.try(entry) {
-		return nil
+		return entry
 	}
 	t.addEntry(entry)
 	return entry

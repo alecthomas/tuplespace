@@ -151,6 +151,27 @@ func TestTupleSpaceTransactionCommit(t *testing.T) {
 	assert.Equal(t, 0, len(tx.taken))
 }
 
+func TestSendWithAcknowledgementTimesOut(t *testing.T) {
+	ts := New()
+	errors := make(chan error, 1)
+	go func() {
+		errors <- ts.SendWithAcknowledgement(Tuple{"i": 10}, time.Millisecond*100)
+	}()
+	assert.Equal(t, ErrTimeout, <-errors)
+}
+
+func TestSendWithAcknowledgement(t *testing.T) {
+	ts := New()
+	errors := make(chan error, 1)
+	go func() {
+		errors <- ts.SendWithAcknowledgement(Tuple{"i": 10}, time.Millisecond*100)
+	}()
+	tuple, err := ts.Take("i", 0)
+	assert.NoError(t, err)
+	assert.Equal(t, Tuple{"i": 10}, tuple)
+	assert.NoError(t, <-errors)
+}
+
 func BenchmarkTupleSend(b *testing.B) {
 	ts := New()
 	tuple := Tuple{"i": 0}
