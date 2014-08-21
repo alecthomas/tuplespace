@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-func makeSampleTuples() (*Tuples, []*TupleEntry) {
-	tuples := &Tuples{}
-	expected := []*TupleEntry{
-		&TupleEntry{Expires: time.Now().Add(time.Second)},
-		&TupleEntry{Expires: time.Now().Add(time.Second * 2)},
-		&TupleEntry{Expires: time.Now().Add(time.Second * 3)},
-		&TupleEntry{Expires: time.Now().Add(time.Second * 4)},
+func makeSampleTuples() (*tupleEntries, []*tupleEntry) {
+	tuples := &tupleEntries{}
+	expected := []*tupleEntry{
+		&tupleEntry{Expires: time.Now().Add(time.Second)},
+		&tupleEntry{Expires: time.Now().Add(time.Second * 2)},
+		&tupleEntry{Expires: time.Now().Add(time.Second * 3)},
+		&tupleEntry{Expires: time.Now().Add(time.Second * 4)},
 	}
 	tuples.Add(expected[0])
 	tuples.Add(expected[1])
@@ -26,7 +26,7 @@ func makeSampleTuples() (*Tuples, []*TupleEntry) {
 
 func TestTuplesAdd(t *testing.T) {
 	tuples, expected := makeSampleTuples()
-	actual := []*TupleEntry{}
+	actual := []*tupleEntry{}
 	for i := tuples.Begin(); i != tuples.End(); i = tuples.Next(i) {
 		actual = append(actual, tuples.Get(i))
 	}
@@ -41,19 +41,19 @@ func TestTuplesRemove(t *testing.T) {
 		count++
 	}
 	assert.Equal(t, len(expected)-1, count)
-	assert.Equal(t, 4, len(tuples.tuples))
+	assert.Equal(t, 4, len(tuples.entries))
 	assert.Equal(t, 1, len(tuples.free))
 }
 
 func TestTupleSpaceTake(t *testing.T) {
 	ts := New()
 	assert.NoError(t, ts.Send(Tuple{"a": 10}, 0))
-	assert.Equal(t, 1, len(ts.tuples.tuples))
+	assert.Equal(t, 1, len(ts.entries.entries))
 	tuple, err := ts.Take("a == 10", 0)
 	assert.NoError(t, err)
 	assert.NotNil(t, tuple)
 	assert.Equal(t, 10, tuple["a"])
-	assert.Nil(t, ts.tuples.tuples[0])
+	assert.Nil(t, ts.entries.entries[0])
 }
 
 func TestTupleSpaceTakeWaitTimeout(t *testing.T) {
@@ -115,6 +115,40 @@ func TestTupleSpaceReadIsRandomish(t *testing.T) {
 		}
 	}
 	assert.True(t, notequal > 50)
+}
+
+func TestTupleSpaceTransactionAbort(t *testing.T) {
+	ts := New()
+	for i := 0; i < 100; i++ {
+		ts.Send(Tuple{"i": i}, 0)
+	}
+	tx := ts.Transaction()
+	for i := 0; i < 50; i++ {
+		_, err := tx.Take("i", 0)
+		assert.NoError(t, err)
+	}
+	assert.Equal(t, 50, ts.entries.Size())
+	assert.Equal(t, 50, len(tx.entries))
+	assert.Equal(t, 50, len(tx.taken))
+	tx.Abort()
+	assert.Equal(t, 100, ts.entries.Size())
+	assert.Equal(t, 0, len(tx.entries))
+	assert.Equal(t, 0, len(tx.taken))
+}
+
+func TestTupleSpaceTransactionCommit(t *testing.T) {
+	ts := New()
+	for i := 0; i < 100; i++ {
+		ts.Send(Tuple{"i": i}, 0)
+	}
+	tx := ts.Transaction()
+	for i := 0; i < 50; i++ {
+		tx.Take("i", 0)
+	}
+	tx.Commit()
+	assert.Equal(t, 50, ts.entries.Size())
+	assert.Equal(t, 0, len(tx.entries))
+	assert.Equal(t, 0, len(tx.taken))
 }
 
 func BenchmarkTupleSend(b *testing.B) {

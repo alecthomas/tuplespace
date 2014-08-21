@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	// MaxTupleLifetime is the maximum time a tuple can be alive in the TupleSpace.
 	MaxTupleLifetime = time.Second * 60
 )
 
@@ -17,46 +18,57 @@ var (
 
 type Tuple map[string]interface{}
 
-type TupleEntry struct {
+type tupleEntry struct {
 	Tuple   Tuple
 	Expires time.Time
+	ack     chan error
 }
 
-type Tuples struct {
-	tuples []*TupleEntry
-	free   []int
-}
-
-func (t *Tuples) Add(tuple *TupleEntry) {
-	l := len(t.free)
-	if l != 0 {
-		i := t.free[l-1]
-		t.tuples[i] = tuple
-		t.free = t.free[:l-1]
-	} else {
-		t.tuples = append(t.tuples, tuple)
+func (t *tupleEntry) Processed(err error) {
+	if t.ack != nil {
+		t.ack <- err
 	}
 }
 
-func (t *Tuples) Remove(i int) {
-	t.tuples[i] = nil
+type tupleEntries struct {
+	entries []*tupleEntry
+	free    []int
+}
+
+func (t *tupleEntries) Size() int {
+	return len(t.entries) - len(t.free)
+}
+
+func (t *tupleEntries) Add(tuple *tupleEntry) {
+	l := len(t.free)
+	if l != 0 {
+		i := t.free[l-1]
+		t.entries[i] = tuple
+		t.free = t.free[:l-1]
+	} else {
+		t.entries = append(t.entries, tuple)
+	}
+}
+
+func (t *tupleEntries) Remove(i int) {
+	t.entries[i] = nil
 	t.free = append(t.free, i)
 }
 
 // Shuffle entry with another randomly selected entry.
-func (t *Tuples) Shuffle(i int) {
-	j := rand.Int() % len(t.tuples)
-	t.tuples[i], t.tuples[j] = t.tuples[j], t.tuples[i]
+func (t *tupleEntries) Shuffle(i int) {
+	j := rand.Int() % len(t.entries)
+	t.entries[i], t.entries[j] = t.entries[j], t.entries[i]
 }
 
-func (t *Tuples) Begin() int {
+func (t *tupleEntries) Begin() int {
 	return t.Next(-1)
 }
 
-func (t *Tuples) Next(i int) int {
+func (t *tupleEntries) Next(i int) int {
 	i++
-	n := len(t.tuples)
-	for i < n && t.tuples[i] == nil {
+	n := len(t.entries)
+	for i < n && t.entries[i] == nil {
 		i++
 	}
 	if i >= n {
@@ -65,18 +77,18 @@ func (t *Tuples) Next(i int) int {
 	return i
 }
 
-func (t *Tuples) End() int {
+func (t *tupleEntries) End() int {
 	return -1
 }
 
-func (t *Tuples) Get(i int) *TupleEntry {
-	return t.tuples[i]
+func (t *tupleEntries) Get(i int) *tupleEntry {
+	return t.entries[i]
 }
 
 type waiter struct {
 	match   *TupleMatcher
 	expires <-chan time.Time
-	tuple   chan Tuple
+	tuple   chan *tupleEntry
 }
 
 type waiters struct {
@@ -103,13 +115,13 @@ func (w *waiters) remove(i int) {
 	w.waiters[i] = nil
 }
 
-func (w *waiters) try(tuple Tuple) bool {
+func (w *waiters) try(entry *tupleEntry) bool {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
 	for i, waiter := range w.waiters {
-		if waiter != nil && waiter.match.Match(tuple) {
-			waiter.tuple <- tuple
+		if waiter != nil && waiter.match.Match(entry.Tuple) {
+			waiter.tuple <- entry
 			w.waiters[i] = nil
 			return true
 		}
@@ -119,7 +131,7 @@ func (w *waiters) try(tuple Tuple) bool {
 
 type TupleSpace struct {
 	lock    sync.Mutex
-	tuples  Tuples
+	entries tupleEntries
 	waiters waiters
 }
 
@@ -128,29 +140,64 @@ func New() *TupleSpace {
 }
 
 func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) error {
-	if expires == 0 || expires > MaxTupleLifetime {
-		expires = MaxTupleLifetime
-	}
-	if t.waiters.try(tuple) {
-		return nil
-	}
-	entry := &TupleEntry{
-		Tuple:   tuple,
-		Expires: time.Now().Add(expires),
-	}
-	t.tuples.Add(entry)
+	t.sendTuple(tuple, expires, false)
 	return nil
 }
 
+// SendWithAcknowledgement sends a tuple and waits for it to be ack at least once.
+func (t *TupleSpace) SendWithAcknowledgement(tuple Tuple, expires time.Duration) error {
+	entry := t.sendTuple(tuple, expires, true)
+	return <-entry.ack
+}
+
+func (t *TupleSpace) sendTuple(tuple Tuple, expires time.Duration, ack bool) *tupleEntry {
+	if expires == 0 || expires > MaxTupleLifetime {
+		expires = MaxTupleLifetime
+	}
+	var ackch chan error
+	if ack {
+		ackch = make(chan error, 1)
+	}
+	entry := &tupleEntry{
+		Tuple:   tuple,
+		Expires: time.Now().Add(expires),
+		ack:     ackch,
+	}
+	if t.waiters.try(entry) {
+		return nil
+	}
+	t.addEntry(entry)
+	return entry
+}
+
+// Add an entry to the tuplespace.
+func (t *TupleSpace) addEntry(entry *tupleEntry) {
+	t.entries.Add(entry)
+}
+
 func (t *TupleSpace) Take(match string, timeout time.Duration) (Tuple, error) {
-	return t.consume(match, timeout, true)
+	entry, err := t.consume(match, timeout, true)
+	if err != nil {
+		return nil, err
+	}
+	entry.Processed(nil)
+	return entry.Tuple, nil
 }
 
 func (t *TupleSpace) Read(match string, timeout time.Duration) (Tuple, error) {
-	return t.consume(match, timeout, false)
+	entry, err := t.consume(match, timeout, false)
+	if err != nil {
+		return nil, err
+	}
+	entry.Processed(nil)
+	return entry.Tuple, nil
 }
 
-func (t *TupleSpace) consume(match string, timeout time.Duration, take bool) (Tuple, error) {
+func (t *TupleSpace) Transaction() *Transaction {
+	return &Transaction{space: t}
+}
+
+func (t *TupleSpace) consume(match string, timeout time.Duration, take bool) (*tupleEntry, error) {
 	m, err := Match("%s", match)
 	if err != nil {
 		return nil, err
@@ -161,17 +208,18 @@ func (t *TupleSpace) consume(match string, timeout time.Duration, take bool) (Tu
 	}
 	now := time.Now()
 	t.lock.Lock()
-	for i := t.tuples.Begin(); i != t.tuples.End(); i = t.tuples.Next(i) {
-		tuple := t.tuples.Get(i)
-		if tuple.Expires.Before(now) {
-			t.tuples.Remove(i)
-		} else if m.Match(tuple.Tuple) {
+	for i := t.entries.Begin(); i != t.entries.End(); i = t.entries.Next(i) {
+		entry := t.entries.Get(i)
+		if entry.Expires.Before(now) {
+			entry.Processed(ErrTimeout)
+			t.entries.Remove(i)
+		} else if m.Match(entry.Tuple) {
 			if take {
-				t.tuples.Remove(i)
+				t.entries.Remove(i)
 			}
-			t.tuples.Shuffle(i)
+			t.entries.Shuffle(i)
 			t.lock.Unlock()
-			return tuple.Tuple, nil
+			return entry, nil
 		}
 	}
 	t.lock.Unlock()
@@ -179,7 +227,7 @@ func (t *TupleSpace) consume(match string, timeout time.Duration, take bool) (Tu
 	waiter := &waiter{
 		match:   m,
 		expires: expires,
-		tuple:   make(chan Tuple),
+		tuple:   make(chan *tupleEntry),
 	}
 	id := t.waiters.add(waiter)
 	defer t.waiters.remove(id)
@@ -187,7 +235,61 @@ func (t *TupleSpace) consume(match string, timeout time.Duration, take bool) (Tu
 	case <-expires:
 		return nil, ErrTimeout
 
-	case tuple := <-waiter.tuple:
-		return tuple, nil
+	case entry := <-waiter.tuple:
+		return entry, nil
 	}
+}
+
+type Transaction struct {
+	lock    sync.Mutex
+	space   *TupleSpace
+	entries []*tupleEntry
+	taken   []*tupleEntry
+}
+
+func (t *Transaction) Take(match string, timeout time.Duration) (Tuple, error) {
+	entry, err := t.space.consume(match, timeout, true)
+	if err != nil {
+		return nil, err
+	}
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.entries = append(t.entries, entry)
+	t.taken = append(t.taken, entry)
+	return entry.Tuple, nil
+}
+
+func (t *Transaction) Read(match string, timeout time.Duration) (Tuple, error) {
+	entry, err := t.space.consume(match, timeout, false)
+	if err != nil {
+		return nil, err
+	}
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.entries = append(t.entries, entry)
+	return entry.Tuple, nil
+}
+
+func (t *Transaction) Commit() error {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	for _, entry := range t.entries {
+		entry.Processed(nil)
+	}
+	t.entries = nil
+	t.taken = nil
+	t.space = nil
+	return nil
+}
+
+func (t *Transaction) Abort() error {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	for _, entry := range t.taken {
+		t.space.addEntry(entry)
+	}
+	t.entries = nil
+	t.taken = nil
+	t.space = nil
+	return nil
 }
