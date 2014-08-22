@@ -1,5 +1,31 @@
 package main
 
-func main() {
+import (
+	"net/http"
+	"os"
 
+	"github.com/alecthomas/rapid/schema"
+
+	"github.com/alecthomas/util"
+
+	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/tuplespace"
+)
+
+var (
+	bindFlag = kingpin.Flag("bind", "Bind address for service.").Default("127.0.0.1:2619").TCP()
+	ramlFlag = kingpin.Flag("raml", "Dump RAML service definition.").Bool()
+)
+
+func main() {
+	util.Bootstrap(kingpin.CommandLine, util.AllModules, nil)
+	if *ramlFlag {
+		err := schema.SchemaToRAML("http://"+(*bindFlag).String(), tuplespace.Service(), os.Stdout)
+		kingpin.FatalIfError(err, "failed to generate RAML service definition")
+		return
+	}
+	server, err := tuplespace.Server()
+	kingpin.FatalIfError(err, "failed to create new server")
+	err = http.ListenAndServe((*bindFlag).String(), server)
+	kingpin.FatalIfError(err, "server failed")
 }

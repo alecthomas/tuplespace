@@ -164,7 +164,7 @@ func TestSendWithAcknowledgement(t *testing.T) {
 	ts := New()
 	errors := make(chan error, 1)
 	go func() {
-		errors <- ts.SendWithAcknowledgement(Tuple{"i": 10}, time.Millisecond*100)
+		errors <- ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
 	}()
 	tuple, err := ts.Take("i", 0)
 	assert.NoError(t, err)

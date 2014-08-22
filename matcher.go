@@ -10,9 +10,8 @@ import (
 )
 
 type TupleMatcher struct {
-	ast   *ast.Expr
-	Expr  string
-	Index []string
+	ast  *ast.Expr
+	Expr string
 }
 
 func MustMatch(expr string, args ...interface{}) *TupleMatcher {
@@ -23,6 +22,8 @@ func MustMatch(expr string, args ...interface{}) *TupleMatcher {
 	return m
 }
 
+// Match creates a new TupleMatcher for evaluating an expression against a
+// tuple. An empty expression always evaluates to true.
 func Match(expr string, args ...interface{}) (*TupleMatcher, error) {
 	t := &TupleMatcher{
 		Expr: fmt.Sprintf(expr, args...),
@@ -39,12 +40,14 @@ func (t *TupleMatcher) String() string {
 }
 
 func (t *TupleMatcher) compile() error {
+	if t.Expr == "" {
+		return nil
+	}
 	ast, err := parser.ParseExpr(t.Expr)
 	if err != nil {
 		return err
 	}
 	t.ast = &ast
-	t.Index = index(ast, nil)
 	return nil
 }
 
@@ -54,11 +57,9 @@ func (t *TupleMatcher) Match(tuple Tuple) bool {
 			fmt.Printf("Evaluation of %#v against %#v failed: %s", t.Expr, tuple, err)
 		}
 	}()
-	// for _, v := range t.Index {
-	// 	if _, ok := tuple[v]; !ok {
-	// 		return false
-	// 	}
-	// }
+	if t.Expr == "" {
+		return true
+	}
 	return toBool(eval(tuple, *t.ast))
 }
 
