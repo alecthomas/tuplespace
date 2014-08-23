@@ -2,34 +2,42 @@
 
 This is an implementation of a [tuple space](http://www.mcs.anl.gov/~itf/dbpp/text/node44.html) as a RESTful HTTP service.
 
-NOTE: This is beta software.
+## Background
 
-## Overview
+A tuple space is a shared communication region where tuples are posted to the region and receivers take or read tuples that match constraints.
 
-Includes an in-process tuple space implementation for Go (eg. `tuplespace.NewTupleSpace()`).
+The original definition of a tuple space supported tuples in the formal sense:
 
-A RESTful tuple space server:
+		("age", 10)
+		("age", 20)
 
-```bash
-$ tuplespaced --store=leveldb --db=tuplestore.db &
-$ curl -X POST -H "Content-Type: application/json" -d '{"tuples": [{"cmd": "uname -a"}]}' -i http://localhost:2619/tuplespace/`
-```
+and tuple matches in this form:
 
-Go client:
+		("age", ?)
 
-```go
-ts, err := client.NewTupleSpaceClient("http://127.0.0.1:2169/tuplespace/")
-ts.Send(tuplespace.Tuple{"cmd": "uname -a"}, time.Minute)
-```
+This turns out to be quite restrictive, so this implementation is really *inspired* by tuple spaces, but not strictly adherent to the formal definition.
 
-Python client:
+## Features
 
-```python
->>> import tuplespace
->>> ts = tuplespace.TupleSpace()
->>> ts.take('cmd')
-('cmd', 'uname -a')
-```
+This implementation has the following constraints and/or features:
+
+- "Tuples" are arbitrary maps (not tuples). *Strict tuples are less obvious and more restrictive in how they can be used.*
+- Tuples can be matched using arbitrary expressions. eg. `age > 36`. *Again, to bypass the restrictions of strict tuple matching.*
+- Senders can wait (with optional timeout) for a tuple to be "processed" by a receiver.
+- Supports reservations. A reservation is a set of read/take operations that are either all marked as "processed" or none are. If a transaction is not committed or aborted within a timeout, the transaction times out and is rolled back.
+
+
+## Example
+
+Send a tuple and wait for it to be processed:
+
+		$ curl --data-binary '{"tuples": [{"age": 20}], "ack": true}' http://localhost:2619/tuplespaces/users/tuples
+		{"s":201}
+
+Take a tuple (also marking it as processed):
+
+		$ curl -X DELETE http://localhost:2619/tuplespaces/users/tuples
+		{"s":200,"d":[{"age":20}]}
 
 ## Caveats
 

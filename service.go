@@ -19,11 +19,11 @@ var (
 )
 
 type TupleSpacePath struct {
-	ID string `schema:"id"`
+	SpaceID string `schema:"space"`
 }
 
 func (t *TupleSpacePath) Validate() error {
-	if !spaceNameRegex.MatchString(t.ID) {
+	if !spaceNameRegex.MatchString(t.SpaceID) {
 		return errors.New("space name must match " + spaceNameRegex.String())
 	}
 	return nil
@@ -59,12 +59,12 @@ func (c *ConsumeQuery) Validate() error {
 // The TupleSpace service provides namespaced tuplespaces. Spaces are created on demand.
 //
 // 		GET /tuplespaces -> list tuplespaces
-// 		GET /tuplespaces/{id} -> status of tuplespace
-//		DELETE /tuplespaces/{id} -> delete tuplespace
+// 		GET /tuplespaces/{space} -> status of tuplespace
+//		DELETE /tuplespaces/{space} -> delete tuplespace
 //
-// 		POST /tuplespaces/{id}/tuples -> send tuple to tuplespace {id}
-// 		GET /tuplespaces/{id}/tuples?q={expr}&timeout={timeout} -> read tuple matching {expr}
-// 		DELETE /tuplespaces/{id}/tuples?q={expr}&timeout={timeout} -> read tuple matching {expr}
+// 		POST /tuplespaces/{space}/tuples -> send tuple to tuplespace {space}
+// 		GET /tuplespaces/{space}/tuples?q={expr}&timeout={timeout} -> read tuple matching {expr}
+// 		DELETE /tuplespaces/{space}/tuples?q={expr}&timeout={timeout} -> read tuple matching {expr}
 //
 func Service() *schema.Schema {
 	d := rapid.Define("TupleSpace")
@@ -74,20 +74,20 @@ func Service() *schema.Schema {
 		Description("List tuple spaces.").
 		Get().
 		Response(http.StatusOK, []string{})
-	tuplespace.Route("SpaceStatus", "/tuplespaces/{id:[.\\w]+}").
+	tuplespace.Route("SpaceStatus", "/tuplespaces/{space:[.\\w]+}").
 		Description("Return status of tuple space.").
 		Get().
 		Path(&TupleSpacePath{}).
 		Response(http.StatusOK, &Status{})
-	tuplespace.Route("DeleteSpace", "/tuplespaces/{id:[.\\w]+}").
+	tuplespace.Route("DeleteSpace", "/tuplespaces/{space:[.\\w]+}").
 		Description("Delete a tuple space.").
 		Delete().
 		Path(&TupleSpacePath{}).
 		Response(http.StatusOK, nil).
 		Response(http.StatusNotFound, nil)
 
-	tuples := d.Resource("Tuples", "/tuplespaces/{id:[.\\w]+}/tuples")
-	tuples.Route("Send", "/tuplespaces/{id:[.\\w]+}/tuples").
+	tuples := d.Resource("Tuples", "/tuplespaces/{space:[.\\w]+}/tuples")
+	tuples.Route("Send", "/tuplespaces/{space:[.\\w]+}/tuples").
 		Description("Send a tuple to the space.").
 		Post().
 		Request(&SendRequest{}).
@@ -96,20 +96,21 @@ func Service() *schema.Schema {
 		Response(http.StatusBadRequest, nil).
 		Response(http.StatusGatewayTimeout, nil).
 		Response(http.StatusInternalServerError, nil)
-	tuples.Route("Read", "/tuplespaces/{id:[.\\w]+}/tuples").
+	tuples.Route("Read", "/tuplespaces/{space:[.\\w]+}/tuples").
 		Description("Read a tuple from the space.").
 		Get().
 		Path(&TupleSpacePath{}).
 		Query(&ConsumeQuery{}).
 		Response(http.StatusOK, []Tuple{}).
 		Response(http.StatusGatewayTimeout, nil)
-	tuples.Route("Take", "/tuplespaces/{id:[.\\w]+}/tuples").
+	tuples.Route("Take", "/tuplespaces/{space:[.\\w]+}/tuples").
 		Description("Take a tuple from the space.").
 		Delete().
 		Path(&TupleSpacePath{}).
 		Query(&ConsumeQuery{}).
 		Response(http.StatusOK, []Tuple{}).
 		Response(http.StatusGatewayTimeout, nil)
+
 	return d.Build()
 }
 
@@ -125,6 +126,7 @@ func Server() (*rapid.Server, error) {
 type server struct {
 	lock   sync.Mutex
 	spaces map[string]*TupleSpace
+	txID   int64
 }
 
 func newServer() *server {
@@ -156,18 +158,18 @@ func (s *server) getOrCreate(name string) *TupleSpace {
 }
 
 func (s *server) SpaceStatus(path *TupleSpacePath) (*Status, error) {
-	return s.getOrCreate(path.ID).Status(), nil
+	return s.getOrCreate(path.SpaceID).Status(), nil
 }
 
 func (s *server) DeleteSpace(path *TupleSpacePath) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	space, ok := s.spaces[path.ID]
+	space, ok := s.spaces[path.SpaceID]
 	if !ok {
 		return rapid.Error(http.StatusNotFound, "space not found")
 	}
 	err := space.Close()
-	delete(s.spaces, path.ID)
+	delete(s.spaces, path.SpaceID)
 	if err != nil {
 		return rapid.Error(http.StatusInternalServerError, err.Error())
 	}
@@ -175,7 +177,7 @@ func (s *server) DeleteSpace(path *TupleSpacePath) error {
 }
 
 func (s *server) Send(path *TupleSpacePath, req *SendRequest) error {
-	space := s.getOrCreate(path.ID)
+	space := s.getOrCreate(path.SpaceID)
 	for _, tuple := range req.Tuples {
 		var err error
 		if req.Acknowledge {
@@ -193,7 +195,7 @@ func (s *server) Send(path *TupleSpacePath, req *SendRequest) error {
 }
 
 func (s *server) Read(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.CloseNotifierChannel) ([]Tuple, error) {
-	space := s.getOrCreate(path.ID)
+	space := s.getOrCreate(path.SpaceID)
 	tuple, err := space.Consume(&ConsumeRequest{
 		Match:   query.Query,
 		Timeout: query.Timeout,
@@ -206,7 +208,7 @@ func (s *server) Read(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.Cl
 }
 
 func (s *server) Take(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.CloseNotifierChannel) ([]Tuple, error) {
-	space := s.getOrCreate(path.ID)
+	space := s.getOrCreate(path.SpaceID)
 	tuple, err := space.Consume(&ConsumeRequest{
 		Match:   query.Query,
 		Timeout: query.Timeout,

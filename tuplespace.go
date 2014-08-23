@@ -5,6 +5,8 @@ import (
 	"math/rand"
 	"sync"
 	"time"
+
+	"gopkg.in/tomb.v2"
 )
 
 const (
@@ -13,9 +15,10 @@ const (
 )
 
 var (
-	ErrTimeout           = errors.New("timeout")
-	ErrTupleSpaceDeleted = errors.New("tuplespace deleted")
-	ErrCancelled         = errors.New("cancelled")
+	ErrTimeout            = errors.New("timeout")
+	ErrReservationTimeout = errors.New("reservation timeout")
+	ErrTupleSpaceDeleted  = errors.New("tuplespace deleted")
+	ErrCancelled          = errors.New("cancelled")
 )
 
 type Tuple map[string]interface{}
@@ -287,15 +290,29 @@ func (t *TupleSpace) Read(match string, timeout time.Duration) (Tuple, error) {
 	return entry.Tuple, nil
 }
 
-func (t *TupleSpace) Transaction() *Transaction {
-	return &Transaction{space: t}
+func (t *TupleSpace) Reserve(match string, timeout time.Duration, reservationTimeout time.Duration) (*Reservation, error) {
+	entry, err := t.consume(&ConsumeRequest{
+		Match:   match,
+		Timeout: timeout,
+		Take:    true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	r := &Reservation{
+		entry:   entry,
+		space:   t,
+		timeout: time.After(reservationTimeout),
+	}
+	r.tomb.Go(r.run)
+	return r, nil
 }
 
 type ConsumeRequest struct {
 	Match   string
 	Timeout time.Duration
 	Take    bool
-	Cancel  <-chan bool
+	Cancel  <-chan bool // Cancel can be used to cancel a waiting consume.
 }
 
 func (t *TupleSpace) consume(req *ConsumeRequest) (*tupleEntry, error) {
@@ -362,63 +379,57 @@ func (t *TupleSpace) Consume(req *ConsumeRequest) (Tuple, error) {
 	return entry.Tuple, nil
 }
 
-type Transaction struct {
+type Reservation struct {
+	tomb    tomb.Tomb
 	lock    sync.Mutex
+	entry   *tupleEntry
 	space   *TupleSpace
-	entries []*tupleEntry
-	taken   []*tupleEntry
+	timeout <-chan time.Time
 }
 
-func (t *Transaction) Take(match string, timeout time.Duration) (Tuple, error) {
-	entry, err := t.space.consume(&ConsumeRequest{
-		Match:   match,
-		Timeout: timeout,
-		Take:    true,
-	})
-	if err != nil {
-		return nil, err
+func (r *Reservation) run() error {
+	select {
+	case <-r.timeout:
+		r.lock.Lock()
+		defer r.lock.Unlock()
+		r.cancel()
+		return ErrReservationTimeout
+
+	case <-r.tomb.Dying():
+		return nil
 	}
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	t.entries = append(t.entries, entry)
-	t.taken = append(t.taken, entry)
-	return entry.Tuple, nil
 }
 
-func (t *Transaction) Read(match string, timeout time.Duration) (Tuple, error) {
-	entry, err := t.space.consume(&ConsumeRequest{
-		Match:   match,
-		Timeout: timeout,
-	})
-	if err != nil {
-		return nil, err
-	}
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	t.entries = append(t.entries, entry)
-	return entry.Tuple, nil
+func (r *Reservation) Wait() error {
+	return r.tomb.Wait()
 }
 
-func (t *Transaction) Commit() error {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	for _, entry := range t.entries {
-		entry.Processed(nil)
-	}
-	t.entries = nil
-	t.taken = nil
-	t.space = nil
-	return nil
+func (r *Reservation) Tuple() Tuple {
+	return r.entry.Tuple
 }
 
-func (t *Transaction) Abort() error {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	for _, entry := range t.taken {
-		t.space.addEntry(entry)
+func (r *Reservation) Complete() error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	if !r.tomb.Alive() {
+		return r.tomb.Err()
 	}
-	t.entries = nil
-	t.taken = nil
-	t.space = nil
-	return nil
+	r.entry.Processed(nil)
+	r.tomb.Kill(nil)
+	return r.tomb.Wait()
+}
+
+func (r *Reservation) Cancel() error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	if !r.tomb.Alive() {
+		return r.tomb.Err()
+	}
+	r.tomb.Kill(nil)
+	r.cancel()
+	return r.tomb.Wait()
+}
+
+func (r *Reservation) cancel() {
+	r.space.addEntry(r.entry)
 }

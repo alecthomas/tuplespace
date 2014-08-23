@@ -117,40 +117,6 @@ func TestTupleSpaceReadIsRandomish(t *testing.T) {
 	assert.True(t, notequal > 50)
 }
 
-func TestTupleSpaceTransactionAbort(t *testing.T) {
-	ts := New()
-	for i := 0; i < 100; i++ {
-		ts.Send(Tuple{"i": i}, 0)
-	}
-	tx := ts.Transaction()
-	for i := 0; i < 50; i++ {
-		_, err := tx.Take("i", 0)
-		assert.NoError(t, err)
-	}
-	assert.Equal(t, 50, ts.entries.Size())
-	assert.Equal(t, 50, len(tx.entries))
-	assert.Equal(t, 50, len(tx.taken))
-	tx.Abort()
-	assert.Equal(t, 100, ts.entries.Size())
-	assert.Equal(t, 0, len(tx.entries))
-	assert.Equal(t, 0, len(tx.taken))
-}
-
-func TestTupleSpaceTransactionCommit(t *testing.T) {
-	ts := New()
-	for i := 0; i < 100; i++ {
-		ts.Send(Tuple{"i": i}, 0)
-	}
-	tx := ts.Transaction()
-	for i := 0; i < 50; i++ {
-		tx.Take("i", 0)
-	}
-	tx.Commit()
-	assert.Equal(t, 50, ts.entries.Size())
-	assert.Equal(t, 0, len(tx.entries))
-	assert.Equal(t, 0, len(tx.taken))
-}
-
 func TestSendWithAcknowledgementTimesOut(t *testing.T) {
 	ts := New()
 	errors := make(chan error, 1)
@@ -170,6 +136,39 @@ func TestSendWithAcknowledgement(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, Tuple{"i": 10}, tuple)
 	assert.NoError(t, <-errors)
+}
+
+func TestReservationTimeout(t *testing.T) {
+	ts := New()
+	ts.Send(Tuple{}, 0)
+	r, err := ts.Reserve("", time.Second, time.Millisecond*50)
+	assert.Equal(t, 0, ts.Status().Tuples.Count)
+	assert.NoError(t, err)
+	err = r.Wait()
+	assert.Equal(t, ErrReservationTimeout, err)
+	assert.Equal(t, 1, ts.Status().Tuples.Count)
+}
+
+func TestReservationComplete(t *testing.T) {
+	ts := New()
+	ts.Send(Tuple{}, 0)
+	r, err := ts.Reserve("", time.Second, time.Millisecond*50)
+	assert.Equal(t, 0, ts.Status().Tuples.Count)
+	err = r.Complete()
+	assert.NoError(t, err)
+	assert.Equal(t, 0, ts.Status().Tuples.Count)
+	time.Sleep(time.Millisecond * 100)
+	assert.Equal(t, 0, ts.Status().Tuples.Count)
+}
+
+func TestReservationCancel(t *testing.T) {
+	ts := New()
+	ts.Send(Tuple{}, 0)
+	r, err := ts.Reserve("", time.Second, time.Millisecond*50)
+	assert.Equal(t, 0, ts.Status().Tuples.Count)
+	err = r.Cancel()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, ts.Status().Tuples.Count)
 }
 
 func BenchmarkTupleSend(b *testing.B) {
