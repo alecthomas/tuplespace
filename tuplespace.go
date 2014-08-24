@@ -11,7 +11,9 @@ import (
 
 const (
 	// MaxTupleLifetime is the maximum time a tuple can be alive in the TupleSpace.
-	MaxTupleLifetime = time.Second * 60
+	MaxTupleLifetime      = time.Second * 60
+	MaxConsumeTimeout     = time.Hour * 24
+	MaxReservationTimeout = time.Second * 60
 )
 
 var (
@@ -265,7 +267,7 @@ func (t *TupleSpace) addEntry(entry *tupleEntry) {
 }
 
 func (t *TupleSpace) Take(match string, timeout time.Duration) (Tuple, error) {
-	entry, err := t.consume(&ConsumeRequest{
+	entry, err := t.consume(&ConsumeOptions{
 		Match:   match,
 		Timeout: timeout,
 		Take:    true,
@@ -278,7 +280,7 @@ func (t *TupleSpace) Take(match string, timeout time.Duration) (Tuple, error) {
 }
 
 func (t *TupleSpace) Read(match string, timeout time.Duration) (Tuple, error) {
-	entry, err := t.consume(&ConsumeRequest{
+	entry, err := t.consume(&ConsumeOptions{
 		Match:   match,
 		Timeout: timeout,
 		Take:    false,
@@ -290,11 +292,12 @@ func (t *TupleSpace) Read(match string, timeout time.Duration) (Tuple, error) {
 	return entry.Tuple, nil
 }
 
-func (t *TupleSpace) Reserve(match string, timeout time.Duration, reservationTimeout time.Duration) (*Reservation, error) {
-	entry, err := t.consume(&ConsumeRequest{
+func (t *TupleSpace) ReserveWithCancel(match string, timeout time.Duration, reservationTimeout time.Duration, cancel <-chan bool) (*Reservation, error) {
+	entry, err := t.consume(&ConsumeOptions{
 		Match:   match,
 		Timeout: timeout,
 		Take:    true,
+		Cancel:  cancel,
 	})
 	if err != nil {
 		return nil, err
@@ -308,14 +311,18 @@ func (t *TupleSpace) Reserve(match string, timeout time.Duration, reservationTim
 	return r, nil
 }
 
-type ConsumeRequest struct {
+func (t *TupleSpace) Reserve(match string, timeout time.Duration, reservationTimeout time.Duration) (*Reservation, error) {
+	return t.ReserveWithCancel(match, timeout, reservationTimeout, nil)
+}
+
+type ConsumeOptions struct {
 	Match   string
 	Timeout time.Duration
 	Take    bool
 	Cancel  <-chan bool // Cancel can be used to cancel a waiting consume.
 }
 
-func (t *TupleSpace) consume(req *ConsumeRequest) (*tupleEntry, error) {
+func (t *TupleSpace) consume(req *ConsumeOptions) (*tupleEntry, error) {
 	m, err := Match("%s", req.Match)
 	if err != nil {
 		return nil, err
@@ -370,7 +377,7 @@ func (t *TupleSpace) consume(req *ConsumeRequest) (*tupleEntry, error) {
 	}
 }
 
-func (t *TupleSpace) Consume(req *ConsumeRequest) (Tuple, error) {
+func (t *TupleSpace) Consume(req *ConsumeOptions) (Tuple, error) {
 	entry, err := t.consume(req)
 	if err != nil {
 		return nil, err

@@ -7,7 +7,7 @@ import (
 )
 
 func TestServiceDeadlock(t *testing.T) {
-	path := &TupleSpacePath{SpaceID: "test"}
+	path := &TupleSpacePath{Space: "test"}
 	s := newServer()
 	errors := make(chan error, 10)
 	started := make(chan bool)

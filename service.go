@@ -2,9 +2,11 @@ package tuplespace
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alecthomas/go-logging"
@@ -19,11 +21,11 @@ var (
 )
 
 type TupleSpacePath struct {
-	SpaceID string `schema:"space"`
+	Space string `schema:"space"`
 }
 
 func (t *TupleSpacePath) Validate() error {
-	if !spaceNameRegex.MatchString(t.SpaceID) {
+	if !spaceNameRegex.MatchString(t.Space) {
 		return errors.New("space name must match " + spaceNameRegex.String())
 	}
 	return nil
@@ -45,13 +47,40 @@ func (s *SendRequest) Validate() error {
 	return nil
 }
 
-type ConsumeQuery struct {
+type ConsumeRequest struct {
 	Query   string        `schema:"q"`
 	Timeout time.Duration `schema:"timeout"`
 }
 
-func (c *ConsumeQuery) Validate() error {
+func (c *ConsumeRequest) Validate() error {
 	return nil
+}
+
+type ReservationRequest struct {
+	Query              string        `json:"q"`
+	Timeout            time.Duration `json:"timeout"`
+	ReservationTimeout time.Duration `json:"reservation_timeout"`
+}
+
+func (r *ReservationRequest) Validate() error {
+	if r.ReservationTimeout <= 0 || r.ReservationTimeout > MaxReservationTimeout {
+		return fmt.Errorf("reservation timeout outside acceptable range %s < n < %s", time.Second*0, MaxReservationTimeout)
+	}
+	return nil
+}
+
+type ReservationPath struct {
+	Space       string `schema:"space"`
+	Reservation int64  `schema:"reservation"`
+}
+
+type ReservationResponse struct {
+	ID    int64 `json:"id"`
+	Tuple Tuple `json:"tuple"`
+}
+
+type EndReservationQuery struct {
+	Cancel bool `schema:"cancel"`
 }
 
 // Service definition for the TupleSpace RESTful service.
@@ -65,6 +94,9 @@ func (c *ConsumeQuery) Validate() error {
 // 		POST /tuplespaces/{space}/tuples -> send tuple to tuplespace {space}
 // 		GET /tuplespaces/{space}/tuples?q={expr}&timeout={timeout} -> read tuple matching {expr}
 // 		DELETE /tuplespaces/{space}/tuples?q={expr}&timeout={timeout} -> read tuple matching {expr}
+//
+// 		POST /tuplespaces/{space}/tuples/reservations -> create a tuple reservation
+// 		DELETE /tuplespaces/{space}/tuples/reservations/{reservation} -> complete or cancel a reservation
 //
 func Service() *schema.Schema {
 	d := rapid.Define("TupleSpace")
@@ -100,16 +132,30 @@ func Service() *schema.Schema {
 		Description("Read a tuple from the space.").
 		Get().
 		Path(&TupleSpacePath{}).
-		Query(&ConsumeQuery{}).
+		Query(&ConsumeRequest{}).
 		Response(http.StatusOK, []Tuple{}).
 		Response(http.StatusGatewayTimeout, nil)
 	tuples.Route("Take", "/tuplespaces/{space:[.\\w]+}/tuples").
 		Description("Take a tuple from the space.").
 		Delete().
 		Path(&TupleSpacePath{}).
-		Query(&ConsumeQuery{}).
+		Query(&ConsumeRequest{}).
 		Response(http.StatusOK, []Tuple{}).
 		Response(http.StatusGatewayTimeout, nil)
+
+	reservations := d.Resource("Reservations", "/tuplespaces/{space:[.\\w]+}/reservations")
+	reservations.Route("Reserve", "/tuplespaces/{space:[.\\w]+}/reservations").
+		Description("Create a new reserved tuple.").
+		Post().
+		Path(&TupleSpacePath{}).
+		Request(&ReservationRequest{}).
+		Response(http.StatusCreated, &ReservationResponse{})
+	reservations.Route("EndReservation", "/tuplespaces/{space:[.\\w]+}/reservations/{reservation:\\d+}").
+		Description("Finish a reservation.").
+		Delete().
+		Path(&ReservationPath{}).
+		Query(&EndReservationQuery{}).
+		Response(http.StatusOK, nil)
 
 	return d.Build()
 }
@@ -124,14 +170,17 @@ func Server() (*rapid.Server, error) {
 }
 
 type server struct {
-	lock   sync.Mutex
-	spaces map[string]*TupleSpace
-	txID   int64
+	lock          sync.Mutex
+	spaces        map[string]*TupleSpace
+	reservations  map[int64]*Reservation
+	reservationID int64
 }
 
 func newServer() *server {
 	return &server{
-		spaces: make(map[string]*TupleSpace),
+		spaces:        make(map[string]*TupleSpace),
+		reservations:  make(map[int64]*Reservation),
+		reservationID: time.Now().UnixNano(),
 	}
 }
 
@@ -158,18 +207,18 @@ func (s *server) getOrCreate(name string) *TupleSpace {
 }
 
 func (s *server) SpaceStatus(path *TupleSpacePath) (*Status, error) {
-	return s.getOrCreate(path.SpaceID).Status(), nil
+	return s.getOrCreate(path.Space).Status(), nil
 }
 
 func (s *server) DeleteSpace(path *TupleSpacePath) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	space, ok := s.spaces[path.SpaceID]
+	space, ok := s.spaces[path.Space]
 	if !ok {
 		return rapid.Error(http.StatusNotFound, "space not found")
 	}
 	err := space.Close()
-	delete(s.spaces, path.SpaceID)
+	delete(s.spaces, path.Space)
 	if err != nil {
 		return rapid.Error(http.StatusInternalServerError, err.Error())
 	}
@@ -177,7 +226,7 @@ func (s *server) DeleteSpace(path *TupleSpacePath) error {
 }
 
 func (s *server) Send(path *TupleSpacePath, req *SendRequest) error {
-	space := s.getOrCreate(path.SpaceID)
+	space := s.getOrCreate(path.Space)
 	for _, tuple := range req.Tuples {
 		var err error
 		if req.Acknowledge {
@@ -194,9 +243,9 @@ func (s *server) Send(path *TupleSpacePath, req *SendRequest) error {
 	return nil
 }
 
-func (s *server) Read(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.CloseNotifierChannel) ([]Tuple, error) {
-	space := s.getOrCreate(path.SpaceID)
-	tuple, err := space.Consume(&ConsumeRequest{
+func (s *server) Read(path *TupleSpacePath, query *ConsumeRequest, cancel rapid.CloseNotifierChannel) ([]Tuple, error) {
+	space := s.getOrCreate(path.Space)
+	tuple, err := space.Consume(&ConsumeOptions{
 		Match:   query.Query,
 		Timeout: query.Timeout,
 		Cancel:  cancel,
@@ -207,9 +256,9 @@ func (s *server) Read(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.Cl
 	return []Tuple{tuple}, nil
 }
 
-func (s *server) Take(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.CloseNotifierChannel) ([]Tuple, error) {
-	space := s.getOrCreate(path.SpaceID)
-	tuple, err := space.Consume(&ConsumeRequest{
+func (s *server) Take(path *TupleSpacePath, query *ConsumeRequest, cancel rapid.CloseNotifierChannel) ([]Tuple, error) {
+	space := s.getOrCreate(path.Space)
+	tuple, err := space.Consume(&ConsumeOptions{
 		Match:   query.Query,
 		Timeout: query.Timeout,
 		Take:    true,
@@ -219,4 +268,47 @@ func (s *server) Take(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.Cl
 		return nil, rapid.Error(http.StatusInternalServerError, err.Error())
 	}
 	return []Tuple{tuple}, nil
+}
+
+// reservations.Route("Reserve", "/tuplespaces/{space:[.\\w]+}/reservations").
+// 	Description("Create a new reserved tuple.").
+// 	Post().
+// 	Path(&ReservationPath{}).
+// 	Request(&ConsumeRequest{}).
+// 	Response(http.StatusCreated, int64(0))
+// reservations.Route("EndReservation", "/tuplespaces/{space:[.\\w]+}/reservations/{reservation:\\d+}").
+// 	Description("Finish a reservation.").
+// 	Post().
+// 	Path(&ReservationPath{}).
+// 	Request(&EndReservationQuery{}).
+// 	Response(http.StatusOK, nil)
+
+func (s *server) Reserve(path *TupleSpacePath, req *ReservationRequest, cancel rapid.CloseNotifierChannel) (*ReservationResponse, error) {
+	space := s.getOrCreate(path.Space)
+	reservation, err := space.ReserveWithCancel(req.Query, req.Timeout, req.ReservationTimeout, cancel)
+	if err != nil {
+		return nil, err
+	}
+	resp := &ReservationResponse{
+		ID:    atomic.AddInt64(&s.reservationID, 1),
+		Tuple: reservation.Tuple(),
+	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.reservations[resp.ID] = reservation
+	return resp, nil
+}
+
+func (s *server) EndReservation(path *ReservationPath, req *EndReservationQuery) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	reservation, ok := s.reservations[path.Reservation]
+	if !ok {
+		return rapid.Error(http.StatusNotFound, "reservation not found")
+	}
+	defer delete(s.reservations, path.Reservation)
+	if req.Cancel {
+		return reservation.Cancel()
+	}
+	return reservation.Complete()
 }
