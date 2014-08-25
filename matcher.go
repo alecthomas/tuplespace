@@ -52,14 +52,14 @@ func (t *TupleMatcher) compile() error {
 }
 
 func (t *TupleMatcher) Match(tuple Tuple) bool {
+	if t.Expr == "" {
+		return true
+	}
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Printf("Evaluation of %#v against %#v failed: %s", t.Expr, tuple, err)
 		}
 	}()
-	if t.Expr == "" {
-		return true
-	}
 	return toBool(eval(tuple, *t.ast))
 }
 

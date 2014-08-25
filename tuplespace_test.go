@@ -1,17 +1,25 @@
 package tuplespace
 
 import (
+	"sort"
 	"sync"
-
-	"github.com/stretchrcom/testify/assert"
-
 	"testing"
 	"time"
+
+	"github.com/stretchrcom/testify/assert"
 )
 
-func makeSampleTuples() (*tupleEntries, []*tupleEntry) {
-	tuples := &tupleEntries{}
-	expected := []*tupleEntry{
+type tupleEntriesSlice []*tupleEntry
+
+func (t tupleEntriesSlice) Len() int           { return len(t) }
+func (t tupleEntriesSlice) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
+func (t tupleEntriesSlice) Less(i, j int) bool { return t[i].Expires.Before(t[j].Expires) }
+
+func makeSampleTuples() (*tupleEntries, tupleEntriesSlice) {
+	tuples := &tupleEntries{
+		entries: map[*tupleEntry]struct{}{},
+	}
+	expected := tupleEntriesSlice{
 		&tupleEntry{Expires: time.Now().Add(time.Second)},
 		&tupleEntry{Expires: time.Now().Add(time.Second * 2)},
 		&tupleEntry{Expires: time.Now().Add(time.Second * 3)},
@@ -21,28 +29,30 @@ func makeSampleTuples() (*tupleEntries, []*tupleEntry) {
 	tuples.Add(expected[1])
 	tuples.Add(expected[2])
 	tuples.Add(expected[3])
+	sort.Sort(expected)
 	return tuples, expected
 }
 
 func TestTuplesAdd(t *testing.T) {
 	tuples, expected := makeSampleTuples()
-	actual := []*tupleEntry{}
-	for i := tuples.Begin(); i != tuples.End(); i = tuples.Next(i) {
-		actual = append(actual, tuples.Get(i))
-	}
+	actual := (tupleEntriesSlice)(tuples.Copy())
+	sort.Sort(actual)
 	assert.Equal(t, expected, actual)
 }
 
 func TestTuplesRemove(t *testing.T) {
 	tuples, expected := makeSampleTuples()
-	tuples.Remove(1)
-	count := 0
-	for i := tuples.Begin(); i != tuples.End(); i = tuples.Next(i) {
-		count++
+	i := 0
+	for entry := range tuples.entries {
+		if i == 1 {
+			delete(tuples.entries, entry)
+			break
+		}
+		i++
 	}
+	count := tuples.Size()
 	assert.Equal(t, len(expected)-1, count)
-	assert.Equal(t, 4, len(tuples.entries))
-	assert.Equal(t, 1, len(tuples.free))
+	assert.Equal(t, 3, len(tuples.entries))
 }
 
 func TestTupleSpaceTake(t *testing.T) {
@@ -53,7 +63,6 @@ func TestTupleSpaceTake(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, tuple)
 	assert.Equal(t, 10, tuple["a"])
-	assert.Nil(t, ts.entries.entries[0])
 }
 
 func TestTupleSpaceTakeWaitTimeout(t *testing.T) {
@@ -121,7 +130,8 @@ func TestSendWithAcknowledgementTimesOut(t *testing.T) {
 	ts := New()
 	errors := make(chan error, 1)
 	go func() {
-		errors <- ts.SendWithAcknowledgement(Tuple{"i": 10}, time.Millisecond*100)
+		_, err := ts.SendWithAcknowledgement(Tuple{"i": 10}, time.Millisecond*100)
+		errors <- err
 	}()
 	assert.Equal(t, ErrTimeout, <-errors)
 }
@@ -130,7 +140,8 @@ func TestSendWithAcknowledgement(t *testing.T) {
 	ts := New()
 	errors := make(chan error, 1)
 	go func() {
-		errors <- ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
+		_, err := ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
+		errors <- err
 	}()
 	tuple, err := ts.Take("i", 0)
 	assert.NoError(t, err)
@@ -154,7 +165,7 @@ func TestReservationComplete(t *testing.T) {
 	ts.Send(Tuple{}, 0)
 	r, err := ts.Reserve("", time.Second, time.Millisecond*50)
 	assert.Equal(t, 0, ts.Status().Tuples.Count)
-	err = r.Complete()
+	err = r.Complete(nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, ts.Status().Tuples.Count)
 	time.Sleep(time.Millisecond * 100)
@@ -169,6 +180,21 @@ func TestReservationCancel(t *testing.T) {
 	err = r.Cancel()
 	assert.NoError(t, err)
 	assert.Equal(t, 1, ts.Status().Tuples.Count)
+}
+
+func TestReservationCompleteWithAcknowledgement(t *testing.T) {
+	ts := New()
+	res := make(chan tupleOrError)
+	go func() {
+		ack, err := ts.SendWithAcknowledgement(Tuple{"a": 10}, 0)
+		res <- tupleOrError{tuple: ack, err: err}
+	}()
+	r, err := ts.Reserve("", 0, time.Second*10)
+	assert.NoError(t, err)
+	r.Complete(Tuple{"b": 20})
+	te := <-res
+	assert.NoError(t, te.err)
+	assert.Equal(t, te.tuple, Tuple{"b": 20})
 }
 
 func BenchmarkTupleSend(b *testing.B) {
@@ -187,7 +213,10 @@ func benchTupleSendTakeN(b *testing.B, n int) {
 			ts.Send(tuple, 0)
 		}
 		for j := 0; j < n; j++ {
-			ts.Take("", 0)
+			_, err := ts.Take("", 0)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 

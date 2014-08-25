@@ -2,7 +2,6 @@ package tuplespace
 
 import (
 	"errors"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -25,83 +24,88 @@ var (
 
 type Tuple map[string]interface{}
 
+type tupleOrError struct {
+	err   error
+	tuple Tuple
+}
+
 type tupleEntry struct {
 	Tuple   Tuple
 	Expires time.Time
-	ack     chan error
+	ack     chan tupleOrError
 }
 
-func (t *tupleEntry) Processed(err error) {
+func (t *tupleEntry) Failed(err error) {
 	if t.ack != nil {
-		t.ack <- err
+		t.ack <- tupleOrError{err: err}
+	}
+}
+
+func (t *tupleEntry) Processed(tuple Tuple) {
+	if t.ack != nil {
+		t.ack <- tupleOrError{tuple: tuple}
 	}
 }
 
 type tupleEntries struct {
-	entries   []*tupleEntry
-	free      []int
+	lock      sync.Mutex
+	entries   map[*tupleEntry]struct{}
 	seenCount int
 }
 
 func (t *tupleEntries) Close() error {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	t.entries = nil
-	t.free = nil
 	return nil
 }
 
 func (t *tupleEntries) Size() int {
-	return len(t.entries) - len(t.free)
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	return len(t.entries)
 }
 
 func (t *tupleEntries) Seen() int {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	return t.seenCount
 }
 
 func (t *tupleEntries) Add(tuple *tupleEntry) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	t.seenCount++
-	l := len(t.free)
-	if l != 0 {
-		i := t.free[l-1]
-		t.entries[i] = tuple
-		t.free = t.free[:l-1]
-	} else {
-		t.entries = append(t.entries, tuple)
+	t.entries[tuple] = struct{}{}
+}
+
+func (t *tupleEntries) Copy() []*tupleEntry {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	entries := []*tupleEntry{}
+	for entry := range t.entries {
+		entries = append(entries, entry)
 	}
+	return entries
 }
 
-func (t *tupleEntries) Remove(i int) {
-	t.entries[i] = nil
-	t.free = append(t.free, i)
-}
-
-// Shuffle entry with another randomly selected entry.
-func (t *tupleEntries) Shuffle(i int) {
-	j := rand.Int() % len(t.entries)
-	t.entries[i], t.entries[j] = t.entries[j], t.entries[i]
-}
-
-func (t *tupleEntries) Begin() int {
-	return t.Next(-1)
-}
-
-func (t *tupleEntries) Next(i int) int {
-	i++
-	n := len(t.entries)
-	for i < n && t.entries[i] == nil {
-		i++
+func (t *tupleEntries) ConsumeMatch(take bool, m *TupleMatcher) *tupleEntry {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	now := time.Now()
+	for entry := range t.entries {
+		if entry.Expires.Before(now) {
+			entry.Failed(ErrTimeout)
+			delete(t.entries, entry)
+		} else if m == nil || m.Match(entry.Tuple) {
+			entry.Processed(nil)
+			if take {
+				delete(t.entries, entry)
+			}
+			return entry
+		}
 	}
-	if i >= n {
-		return -1
-	}
-	return i
-}
-
-func (t *tupleEntries) End() int {
-	return -1
-}
-
-func (t *tupleEntries) Get(i int) *tupleEntry {
-	return t.entries[i]
+	return nil
 }
 
 type waiter struct {
@@ -141,7 +145,7 @@ func (w *waiters) remove(i int) {
 	w.waiters[i] = nil
 }
 
-func (w *waiters) try(entry *tupleEntry) bool {
+func (w *waiters) Try(entry *tupleEntry) bool {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
@@ -156,13 +160,13 @@ func (w *waiters) try(entry *tupleEntry) bool {
 	return false
 }
 
-func (w *waiters) size() int {
+func (w *waiters) Size() int {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 	return len(w.waiters)
 }
 
-func (w *waiters) seen() int {
+func (w *waiters) Seen() int {
 	return w.seenCount
 }
 
@@ -185,7 +189,11 @@ type TupleSpace struct {
 }
 
 func New() *TupleSpace {
-	return &TupleSpace{}
+	return &TupleSpace{
+		entries: tupleEntries{
+			entries: map[*tupleEntry]struct{}{},
+		},
+	}
 }
 
 func (t *TupleSpace) Close() error {
@@ -213,8 +221,8 @@ func (t *TupleSpace) Status() *Status {
 	status := &Status{}
 	status.Tuples.Count = t.entries.Size()
 	status.Tuples.Seen = t.entries.Seen()
-	status.Waiters.Count = t.waiters.size()
-	status.Waiters.Seen = t.waiters.seen()
+	status.Waiters.Count = t.waiters.Size()
+	status.Waiters.Seen = t.waiters.Seen()
 	return status
 }
 
@@ -223,8 +231,10 @@ func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) error {
 	return nil
 }
 
-// SendWithAcknowledgement sends a tuple and waits for it to be ack at least once.
-func (t *TupleSpace) SendWithAcknowledgement(tuple Tuple, expires time.Duration) error {
+// SendWithAcknowledgement sends a tuple and waits for an acknowledgement.  A
+// normal Take() or Read() will result in a nil ack. By using Reserve() +
+// Complete(tuple) you can ack with a tuple.
+func (t *TupleSpace) SendWithAcknowledgement(tuple Tuple, expires time.Duration) (ack Tuple, err error) {
 	if expires == 0 {
 		expires = MaxTupleLifetime
 	}
@@ -233,11 +243,11 @@ func (t *TupleSpace) SendWithAcknowledgement(tuple Tuple, expires time.Duration)
 	select {
 	case <-timeout:
 		// FIXME: There's a race here. The tuple may still be consumed in the
-		// space after this timeout.
-		return ErrTimeout
+		// window after this timeout.
+		return nil, ErrTimeout
 
-	case err := <-entry.ack:
-		return err
+	case te := <-entry.ack:
+		return te.tuple, te.err
 	}
 }
 
@@ -245,16 +255,18 @@ func (t *TupleSpace) sendTuple(tuple Tuple, expires time.Duration, ack bool) *tu
 	if expires == 0 || expires > MaxTupleLifetime {
 		expires = MaxTupleLifetime
 	}
-	var ackch chan error
+	var ackch chan tupleOrError
 	if ack {
-		ackch = make(chan error, 1)
+		ackch = make(chan tupleOrError, 1)
 	}
 	entry := &tupleEntry{
 		Tuple:   tuple,
 		Expires: time.Now().Add(expires),
 		ack:     ackch,
 	}
-	if t.waiters.try(entry) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	if t.waiters.Try(entry) {
 		return entry
 	}
 	t.addEntry(entry)
@@ -327,23 +339,13 @@ func (t *TupleSpace) consume(req *ConsumeOptions) (*tupleEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
 
 	// Lock around searching and configuring waiters
 	t.lock.Lock()
-	for i := t.entries.Begin(); i != t.entries.End(); i = t.entries.Next(i) {
-		entry := t.entries.Get(i)
-		if entry.Expires.Before(now) {
-			entry.Processed(ErrTimeout)
-			t.entries.Remove(i)
-		} else if m == nil || m.Match(entry.Tuple) {
-			if req.Take {
-				t.entries.Remove(i)
-			}
-			t.entries.Shuffle(i)
-			t.lock.Unlock()
-			return entry, nil
-		}
+	entry := t.entries.ConsumeMatch(req.Take, m)
+	if entry != nil {
+		t.lock.Unlock()
+		return entry, nil
 	}
 	var expires <-chan time.Time
 	if req.Timeout != 0 {
@@ -415,13 +417,13 @@ func (r *Reservation) Tuple() Tuple {
 	return r.entry.Tuple
 }
 
-func (r *Reservation) Complete() error {
+func (r *Reservation) Complete(tuple Tuple) error {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	if !r.tomb.Alive() {
 		return r.tomb.Err()
 	}
-	r.entry.Processed(nil)
+	r.entry.Processed(tuple)
 	r.tomb.Kill(nil)
 	return r.tomb.Wait()
 }
