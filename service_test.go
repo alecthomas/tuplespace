@@ -14,23 +14,23 @@ func TestServiceDeadlock(t *testing.T) {
 	started := make(chan bool)
 	go func() {
 		started <- true
-		_, err := s.Take(path, &ConsumeQuery{}, nil)
+		_, err := s.Take(path, &TakeRequest{}, nil)
 		errors <- err
 	}()
 	<-started
 	err := s.Send(path, &SendRequest{
-		Tuple: Tuple{},
+		Tuples: []Tuple{Tuple{}},
 	})
 	assert.NoError(t, err)
 	assert.NoError(t, <-errors)
 	go func() {
 		started <- true
-		_, err := s.Take(path, &ConsumeQuery{}, nil)
+		_, err := s.Take(path, &TakeRequest{}, nil)
 		errors <- err
 	}()
 	<-started
 	err = s.Send(path, &SendRequest{
-		Tuple: Tuple{},
+		Tuples: []Tuple{Tuple{}},
 	})
 	assert.NoError(t, err)
 	assert.NoError(t, <-errors)
@@ -40,7 +40,7 @@ func BenchmarkServiceSend(b *testing.B) {
 	s := newServer()
 	defer s.Close()
 	for i := 0; i < b.N; i++ {
-		s.Send(&TupleSpacePath{Space: "test"}, &SendRequest{Tuple: Tuple{"a": 10}})
+		s.Send(&TupleSpacePath{Space: "test"}, &SendRequest{Tuples: []Tuple{Tuple{"a": 10}}})
 	}
 }
 
@@ -49,12 +49,12 @@ func benchmarkReadN(b *testing.B, n int) {
 	defer s.Close()
 	path := &TupleSpacePath{Space: "test"}
 	for i := 0; i < n; i++ {
-		s.Send(path, &SendRequest{Tuple: Tuple{"a": i}})
+		s.Send(path, &SendRequest{Tuples: []Tuple{Tuple{"a": i}}})
 	}
 	q := fmt.Sprintf("a > %d", n/2)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		s.Read(path, &ConsumeQuery{Query: q}, nil)
+		s.Read(path, &ReadQuery{Query: q}, nil)
 	}
 	b.StopTimer()
 }
@@ -80,12 +80,17 @@ func BenchmarkServiceTake(b *testing.B) {
 	defer s.Close()
 	path := &TupleSpacePath{Space: "test"}
 	for i := 0; i < b.N; i++ {
-		s.Send(path, &SendRequest{Tuple: Tuple{"a": i}})
+		s.Send(path, &SendRequest{Tuples: []Tuple{Tuple{"a": i}}})
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// q := fmt.Sprintf("a == %d", i)
-		_, err := s.Take(path, &ConsumeQuery{Query: ""}, nil)
+		r, err := s.Take(path, &TakeRequest{Query: ""}, nil)
+		if err != nil {
+			panic(err)
+		}
+		rpath := &ReservationPath{Space: path.Space, Reservation: r.ID}
+		err = s.EndReservation(rpath, &EndReservationRequest{})
 		if err != nil {
 			panic(err)
 		}

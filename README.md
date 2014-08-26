@@ -2,7 +2,7 @@
 
 This is an implementation of a [tuple space](http://www.mcs.anl.gov/~itf/dbpp/text/node44.html) as a RESTful HTTP service.
 
- It implementation has the following constraints and/or features:
+It has the following constraints and/or features:
 
 - "Tuples" are arbitrary maps. *Strict tuples are less obvious and more restrictive in how they can be used.*
 - Tuples can be matched using arbitrary expressions. eg. `age > 36`. *Again, to bypass the restrictions of strict tuple matching.*
@@ -22,22 +22,30 @@ Take a tuple (also marking it as processed):
 		$ curl -X DELETE http://localhost:2619/tuplespaces/users/tuples
 		{"s":200,"d":{"age":20}}
 
+## Operations
+
+The following operations are supported:
+
+- `Read(match, timeout) -> Tuple` - Read a single tuple from the tuple space.
+- `ReadAll(match, timeout) -> []Tuple` - Read all matching tuples from the tuple space.
+- `Send(tuple, expires)` - Send a tuple.
+- `SendMany(tuples, expires)` - Send many tuples at once.
+- `SendWithAcknowledgement(tuple, expires)` - Send a tuple and wait for it to be processed.
+- `Take(match, timeout, reservationTimeout) -> Reservation`
+
+`TakeAll()` is not supported. To support such an operation would require server-server coordination, which is deliberately outside the scope of the server implementation.
+
 ## Features
 
 ### Reservations
 
-A reservation is effectively a two-phase commit, where a client maintains exclusive access to a tuple for the period of the reservation. The client can then mark the tuple as processed or cancelled, or it may time out. A tuple is returned to the space if it times out or is cancelled.
+A reservation is effectively a two-phase commit, where a client maintains exclusive access to a tuple for the period of the reservation. The client can then mark the tuple as processed or cancelled, or it may time out. A tuple is returned to the space if it times out or is cancelled. No other clients may consume the tuple while it is reserved.
 
-## Operations
+All `Take()` operations are issued within a reservation.
 
-The following extended tuplespace operations are supported:
+### Scalability
 
-- `Send(tuple, timeout)` - Send a tuple into the tuplespace, with an optional timeout.
-- `SendMany(tuples, timeout)` - Send tuples into the tuplespace, with an optional timeout.
-- `Take(match, timeout) -> Tuple` - Take (read and remove) a tuple from the tuplespace, with an optional timeout.
-- `Read(match, timeout) -> Tuple` - Read a tuple from the tuplespace, with an optional timeout.
-- `TakeAll(match, timeout) -> []Tuple` - Take (read and remove) all tuples from the tuplespace, with an optional timeout.
-- `ReadAll(match, timeout) -> []Tuple` - Read all tuples from the tuplespace, with an optional timeout.
+The tuple space service can be scaled by simply adding nodes. Clients discover new server nodes by repeatedly reading tuples from a management space.
 
 ## Background
 

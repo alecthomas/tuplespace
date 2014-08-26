@@ -27,6 +27,7 @@ type Tuple map[string]interface{}
 type ConsumeOptions struct {
 	Match   string
 	Timeout time.Duration
+	All     bool
 	Take    bool
 	Cancel  <-chan bool // Cancel can be used to cancel a waiting consume.
 }
@@ -34,13 +35,19 @@ type ConsumeOptions struct {
 type tupleEntry struct {
 	Tuple   Tuple
 	Expires time.Time
+	lock    sync.Mutex
 	ack     chan error
 }
 
 func (t *tupleEntry) Processed(err error) {
-	defer func() { _ = recover() }()
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	if t.ack == nil {
+		return
+	}
 	t.ack <- err
 	close(t.ack)
+	t.ack = nil
 }
 
 type tupleEntries struct {
@@ -85,7 +92,7 @@ func (t *tupleEntries) Copy() []*tupleEntry {
 	return entries
 }
 
-func (t *tupleEntries) ConsumeMatch(take bool, m *TupleMatcher) *tupleEntry {
+func (t *tupleEntries) ConsumeMatch(take, all bool, m *TupleMatcher) (entries []*tupleEntry) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	now := time.Now()
@@ -98,16 +105,20 @@ func (t *tupleEntries) ConsumeMatch(take bool, m *TupleMatcher) *tupleEntry {
 			if take {
 				delete(t.entries, entry)
 			}
-			return entry
+			entries = append(entries, entry)
+			if !all {
+				return
+			}
 		}
 	}
-	return nil
+	return
 }
 
 type waiter struct {
 	match   *TupleMatcher
 	expires <-chan time.Time
 	tuple   chan *tupleEntry
+	take    bool
 }
 
 func (w *waiter) Close() error {
@@ -117,7 +128,7 @@ func (w *waiter) Close() error {
 
 type waiters struct {
 	lock      sync.Mutex
-	waiters   []*waiter
+	waiters   map[*waiter]struct{}
 	seenCount int
 }
 
@@ -125,35 +136,29 @@ func (w *waiters) add(a *waiter) int {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 	w.seenCount++
-	for i, waiter := range w.waiters {
-		if waiter == nil {
-			w.waiters[i] = a
-			return i
-		}
-	}
-	w.waiters = append(w.waiters, a)
+	w.waiters[a] = struct{}{}
 	return len(w.waiters) - 1
 }
 
-func (w *waiters) remove(i int) {
+func (w *waiters) remove(waiter *waiter) {
 	w.lock.Lock()
 	defer w.lock.Unlock()
-	w.waiters[i] = nil
+	delete(w.waiters, waiter)
 }
 
-func (w *waiters) Try(entry *tupleEntry) bool {
+func (w *waiters) Try(entry *tupleEntry) (taken bool, ok bool) {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
-	for i, waiter := range w.waiters {
-		if waiter != nil && waiter.match.Match(entry.Tuple) {
+	for waiter := range w.waiters {
+		if waiter.match.Match(entry.Tuple) {
 			waiter.tuple <- entry
-			w.waiters[i] = nil
+			delete(w.waiters, waiter)
 			w.seenCount++
-			return true
+			return waiter.take, true
 		}
 	}
-	return false
+	return false, false
 }
 
 func (w *waiters) Size() int {
@@ -169,10 +174,8 @@ func (w *waiters) Seen() int {
 func (w *waiters) Close() error {
 	w.lock.Lock()
 	defer w.lock.Unlock()
-	for _, waiter := range w.waiters {
-		if waiter != nil {
-			waiter.Close()
-		}
+	for waiter := range w.waiters {
+		waiter.Close()
 	}
 	w.waiters = nil
 	return nil
@@ -188,6 +191,9 @@ func New() *TupleSpace {
 	return &TupleSpace{
 		entries: tupleEntries{
 			entries: map[*tupleEntry]struct{}{},
+		},
+		waiters: waiters{
+			waiters: map[*waiter]struct{}{},
 		},
 	}
 }
@@ -222,9 +228,14 @@ func (t *TupleSpace) Status() *Status {
 	return status
 }
 
-func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) error {
+func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) {
 	t.sendTuple(tuple, expires, false)
-	return nil
+}
+
+func (t *TupleSpace) SendMany(tuples []Tuple, expires time.Duration) {
+	for _, tuple := range tuples {
+		t.sendTuple(tuple, expires, false)
+	}
 }
 
 // SendWithAcknowledgement sends a tuple and waits for an acknowledgement that
@@ -250,17 +261,21 @@ func (t *TupleSpace) sendTuple(tuple Tuple, expires time.Duration, ack bool) *tu
 	if expires == 0 || expires > MaxTupleLifetime {
 		expires = MaxTupleLifetime
 	}
+	var ackch chan error
+	if ack {
+		ackch = make(chan error, 1)
+	}
 	entry := &tupleEntry{
 		Tuple:   tuple,
 		Expires: time.Now().Add(expires),
-		ack:     make(chan error, 1),
+		ack:     ackch,
 	}
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	if t.waiters.Try(entry) {
-		return entry
+	taken, ok := t.waiters.Try(entry)
+	if !taken || !ok {
+		t.addEntry(entry)
 	}
-	t.addEntry(entry)
 	return entry
 }
 
@@ -269,33 +284,41 @@ func (t *TupleSpace) addEntry(entry *tupleEntry) {
 	t.entries.Add(entry)
 }
 
-func (t *TupleSpace) Take(match string, timeout time.Duration) (Tuple, error) {
-	entry, err := t.consume(&ConsumeOptions{
-		Match:   match,
-		Timeout: timeout,
-		Take:    true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	entry.Processed(nil)
-	return entry.Tuple, nil
-}
-
+// Read an entry from the TupleSpace. Consecutive reads can return the same tuple.
 func (t *TupleSpace) Read(match string, timeout time.Duration) (Tuple, error) {
-	entry, err := t.consume(&ConsumeOptions{
+	entries, err := t.consume(&ConsumeOptions{
 		Match:   match,
 		Timeout: timeout,
 	})
 	if err != nil {
 		return nil, err
 	}
-	entry.Processed(nil)
-	return entry.Tuple, nil
+	entries[0].Processed(nil)
+	return entries[0].Tuple, nil
 }
 
-func (t *TupleSpace) ReserveWithCancel(match string, timeout time.Duration, reservationTimeout time.Duration, cancel <-chan bool) (*Reservation, error) {
-	entry, err := t.consume(&ConsumeOptions{
+func (t *TupleSpace) ReadAll(match string, timeout time.Duration) ([]Tuple, error) {
+	entries, err := t.consume(&ConsumeOptions{
+		Match:   match,
+		Timeout: timeout,
+		All:     true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	tuples := make([]Tuple, len(entries))
+	for i, entry := range entries {
+		tuples[i] = entry.Tuple
+		entry.Processed(nil)
+	}
+	return tuples, nil
+}
+
+func (t *TupleSpace) TakeWithCancel(match string, timeout time.Duration, reservationTimeout time.Duration, cancel <-chan bool) (*Reservation, error) {
+	if reservationTimeout == 0 {
+		reservationTimeout = MaxReservationTimeout
+	}
+	entries, err := t.consume(&ConsumeOptions{
 		Match:   match,
 		Timeout: timeout,
 		Take:    true,
@@ -305,7 +328,7 @@ func (t *TupleSpace) ReserveWithCancel(match string, timeout time.Duration, rese
 		return nil, err
 	}
 	r := &Reservation{
-		entry:   entry,
+		entry:   entries[0],
 		space:   t,
 		timeout: time.After(reservationTimeout),
 	}
@@ -313,11 +336,14 @@ func (t *TupleSpace) ReserveWithCancel(match string, timeout time.Duration, rese
 	return r, nil
 }
 
-func (t *TupleSpace) Reserve(match string, timeout time.Duration, reservationTimeout time.Duration) (*Reservation, error) {
-	return t.ReserveWithCancel(match, timeout, reservationTimeout, nil)
+// Take a tuple within a reservation. Takes must always be performed inside a
+// reservation due so that in a multi-server setup, redundant taken tuples can
+// be returned.
+func (t *TupleSpace) Take(match string, timeout time.Duration, reservationTimeout time.Duration) (*Reservation, error) {
+	return t.TakeWithCancel(match, timeout, reservationTimeout, nil)
 }
 
-func (t *TupleSpace) consume(req *ConsumeOptions) (*tupleEntry, error) {
+func (t *TupleSpace) consume(req *ConsumeOptions) ([]*tupleEntry, error) {
 	m, err := Match("%s", req.Match)
 	if err != nil {
 		return nil, err
@@ -325,10 +351,10 @@ func (t *TupleSpace) consume(req *ConsumeOptions) (*tupleEntry, error) {
 
 	// Lock around searching and configuring waiters
 	t.lock.Lock()
-	entry := t.entries.ConsumeMatch(req.Take, m)
-	if entry != nil {
+	entries := t.entries.ConsumeMatch(req.Take, req.All, m)
+	if len(entries) > 0 {
 		t.lock.Unlock()
-		return entry, nil
+		return entries, nil
 	}
 	var expires <-chan time.Time
 	if req.Timeout != 0 {
@@ -339,36 +365,41 @@ func (t *TupleSpace) consume(req *ConsumeOptions) (*tupleEntry, error) {
 		expires: expires,
 		tuple:   make(chan *tupleEntry),
 	}
-	id := t.waiters.add(waiter)
+	t.waiters.add(waiter)
 	t.lock.Unlock()
 
 	// NOTE: We don't remove() the waiter if the tuple space has been deleted,
 	// thus no "defer t.waiters.remove(id)"" here.
 	select {
 	case <-req.Cancel:
-		t.waiters.remove(id)
+		t.waiters.remove(waiter)
 		return nil, ErrCancelled
 
 	case <-waiter.expires:
-		t.waiters.remove(id)
+		t.waiters.remove(waiter)
 		return nil, ErrTimeout
 
 	case entry := <-waiter.tuple:
 		if entry == nil {
 			return nil, ErrTupleSpaceDeleted
 		}
-		t.waiters.remove(id)
-		return entry, nil
+		t.waiters.remove(waiter)
+		return []*tupleEntry{entry}, nil
 	}
 }
 
-func (t *TupleSpace) Consume(req *ConsumeOptions) (Tuple, error) {
-	entry, err := t.consume(req)
+// Consume provides low-level control over consume operations Read, ReadAll and Take.
+func (t *TupleSpace) Consume(req *ConsumeOptions) ([]Tuple, error) {
+	entries, err := t.consume(req)
 	if err != nil {
 		return nil, err
 	}
-	entry.Processed(nil)
-	return entry.Tuple, nil
+	tuples := make([]Tuple, len(entries))
+	for i, entry := range entries {
+		tuples[i] = entry.Tuple
+		entry.Processed(nil)
+	}
+	return tuples, nil
 }
 
 type Reservation struct {
@@ -402,12 +433,13 @@ func (r *Reservation) Tuple() Tuple {
 
 func (r *Reservation) Complete() error {
 	r.lock.Lock()
-	defer r.lock.Unlock()
 	if !r.tomb.Alive() {
+		r.lock.Unlock()
 		return r.tomb.Err()
 	}
 	r.entry.Processed(nil)
 	r.tomb.Kill(nil)
+	r.lock.Unlock()
 	return r.tomb.Wait()
 }
 

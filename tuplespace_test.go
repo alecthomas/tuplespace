@@ -57,10 +57,12 @@ func TestTuplesRemove(t *testing.T) {
 
 func TestTupleSpaceTake(t *testing.T) {
 	ts := New()
-	assert.NoError(t, ts.Send(Tuple{"a": 10}, 0))
+	ts.Send(Tuple{"a": 10}, 0)
 	assert.Equal(t, 1, len(ts.entries.entries))
-	tuple, err := ts.Take("a == 10", 0)
+	reservation, err := ts.Take("a == 10", 0, 0)
 	assert.NoError(t, err)
+	tuple := reservation.Tuple()
+	reservation.Complete()
 	assert.NotNil(t, tuple)
 	assert.Equal(t, 10, tuple["a"])
 }
@@ -71,8 +73,11 @@ func TestTupleSpaceTakeWaitTimeout(t *testing.T) {
 	ts.Send(Tuple{"a": 9}, 0)
 
 	go func() {
-		_, err := ts.Take("a >= 10", time.Millisecond*10)
+		reservation, err := ts.Take("a >= 10", time.Millisecond*10, 0)
 		errors <- err
+		if reservation != nil {
+			reservation.Complete()
+		}
 	}()
 
 	ts.Send(Tuple{"a": 9}, 0)
@@ -93,9 +98,10 @@ func TestTupleSpaceTakeConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			for i := 0; i < 100; i++ {
-				tuple, err := ts.Take("i", 0)
+				reservation, err := ts.Take("i", 0, 0)
 				assert.NoError(t, err)
-				tuples <- tuple
+				reservation.Complete()
+				tuples <- reservation.Tuple()
 			}
 			wg.Done()
 		}()
@@ -107,6 +113,16 @@ func TestTupleSpaceTakeConcurrent(t *testing.T) {
 		count++
 	}
 	assert.Equal(t, 1000, count)
+}
+
+func TestTupleSpaceReadAll(t *testing.T) {
+	ts := New()
+	for i := 0; i < 100; i++ {
+		ts.Send(Tuple{"i": i}, 0)
+	}
+	tuples, err := ts.ReadAll("i >= 50", 0)
+	assert.NoError(t, err)
+	assert.Equal(t, 50, len(tuples))
 }
 
 func TestTupleSpaceReadIsRandomish(t *testing.T) {
@@ -143,9 +159,10 @@ func TestSendWithAcknowledgement(t *testing.T) {
 		err := ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
 		errors <- err
 	}()
-	tuple, err := ts.Take("i", 0)
+	reservation, err := ts.Take("i", 0, 0)
 	assert.NoError(t, err)
-	assert.Equal(t, Tuple{"i": 10}, tuple)
+	reservation.Complete()
+	assert.Equal(t, Tuple{"i": 10}, reservation.Tuple())
 	assert.NoError(t, <-errors)
 }
 
@@ -153,22 +170,22 @@ func TestSendWithAcknowledgementAndMultipleReads(t *testing.T) {
 	ts := New()
 	errors := make(chan error, 1)
 	go func() {
-		err := ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
-		errors <- err
+		errors <- ts.SendWithAcknowledgement(Tuple{"i": 10}, time.Second*1)
 	}()
 	tuple, err := ts.Read("i", 0)
+	assert.NoError(t, <-errors)
 	assert.NoError(t, err)
 	assert.Equal(t, Tuple{"i": 10}, tuple)
+
 	tuple, err = ts.Read("i", 0)
 	assert.NoError(t, err)
 	assert.Equal(t, Tuple{"i": 10}, tuple)
-	assert.NoError(t, <-errors)
 }
 
-func TestReservationTimeout(t *testing.T) {
+func TestTakeTimeout(t *testing.T) {
 	ts := New()
 	ts.Send(Tuple{}, 0)
-	r, err := ts.Reserve("", time.Second, time.Millisecond*50)
+	r, err := ts.Take("", time.Second, time.Millisecond*50)
 	assert.Equal(t, 0, ts.Status().Tuples.Count)
 	assert.NoError(t, err)
 	err = r.Wait()
@@ -176,10 +193,10 @@ func TestReservationTimeout(t *testing.T) {
 	assert.Equal(t, 1, ts.Status().Tuples.Count)
 }
 
-func TestReservationComplete(t *testing.T) {
+func TestTakeComplete(t *testing.T) {
 	ts := New()
 	ts.Send(Tuple{}, 0)
-	r, err := ts.Reserve("", time.Second, time.Millisecond*50)
+	r, err := ts.Take("", time.Second, time.Millisecond*50)
 	assert.Equal(t, 0, ts.Status().Tuples.Count)
 	err = r.Complete()
 	assert.NoError(t, err)
@@ -188,23 +205,23 @@ func TestReservationComplete(t *testing.T) {
 	assert.Equal(t, 0, ts.Status().Tuples.Count)
 }
 
-func TestReservationCancel(t *testing.T) {
+func TestTakeCancel(t *testing.T) {
 	ts := New()
 	ts.Send(Tuple{}, 0)
-	r, err := ts.Reserve("", time.Second, time.Millisecond*50)
+	r, err := ts.Take("", time.Second, time.Millisecond*50)
 	assert.Equal(t, 0, ts.Status().Tuples.Count)
 	err = r.Cancel()
 	assert.NoError(t, err)
 	assert.Equal(t, 1, ts.Status().Tuples.Count)
 }
 
-func TestReservationCompleteWithAcknowledgement(t *testing.T) {
+func TestTakeCompleteWithAcknowledgement(t *testing.T) {
 	ts := New()
 	errors := make(chan error)
 	go func() {
 		errors <- ts.SendWithAcknowledgement(Tuple{"a": 10}, 0)
 	}()
-	r, err := ts.Reserve("", 0, time.Second*10)
+	r, err := ts.Take("", 0, time.Second*10)
 	assert.NoError(t, err)
 	r.Complete()
 	err = <-errors
@@ -227,10 +244,11 @@ func benchTupleSendTakeN(b *testing.B, n int) {
 			ts.Send(tuple, 0)
 		}
 		for j := 0; j < n; j++ {
-			_, err := ts.Take("", 0)
+			r, err := ts.Take("", 0, 0)
 			if err != nil {
 				panic(err)
 			}
+			r.Complete()
 		}
 	}
 
