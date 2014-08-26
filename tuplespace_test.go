@@ -149,6 +149,22 @@ func TestSendWithAcknowledgement(t *testing.T) {
 	assert.NoError(t, <-errors)
 }
 
+func TestSendWithAcknowledgementAndMultipleReads(t *testing.T) {
+	ts := New()
+	errors := make(chan error, 1)
+	go func() {
+		_, err := ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
+		errors <- err
+	}()
+	tuple, err := ts.Read("i", 0)
+	assert.NoError(t, err)
+	assert.Equal(t, Tuple{"i": 10}, tuple)
+	tuple, err = ts.Read("i", 0)
+	assert.NoError(t, err)
+	assert.Equal(t, Tuple{"i": 10}, tuple)
+	assert.NoError(t, <-errors)
+}
+
 func TestReservationTimeout(t *testing.T) {
 	ts := New()
 	ts.Send(Tuple{}, 0)

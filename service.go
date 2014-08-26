@@ -32,17 +32,14 @@ func (t *TupleSpacePath) Validate() error {
 }
 
 type SendRequest struct {
-	Tuples      []Tuple       `json:"tuples"`
+	Tuple       Tuple         `json:"tuple"`
 	Expires     time.Duration `json:"expires,omitempty"`
 	Acknowledge bool          `json:"ack"`
 }
 
 func (s *SendRequest) Validate() error {
-	if len(s.Tuples) == 0 {
-		return errors.New("need at least one tuple")
-	}
-	if s.Acknowledge && len(s.Tuples) > 1 {
-		return errors.New("can only acknowledge a single tuple")
+	if s.Tuple == nil {
+		return errors.New("need a tuple")
 	}
 	return nil
 }
@@ -134,14 +131,14 @@ func Service() *schema.Schema {
 		Get().
 		Path(&TupleSpacePath{}).
 		Query(&ConsumeQuery{}).
-		Response(http.StatusOK, []Tuple{}).
+		Response(http.StatusOK, Tuple{}).
 		Response(http.StatusGatewayTimeout, nil)
 	tuples.Route("Take", "/tuplespaces/{space:[.\\w]+}/tuples").
 		Description("Take a tuple from the space.").
 		Delete().
 		Path(&TupleSpacePath{}).
 		Query(&ConsumeQuery{}).
-		Response(http.StatusOK, []Tuple{}).
+		Response(http.StatusOK, Tuple{}).
 		Response(http.StatusGatewayTimeout, nil)
 
 	reservations := d.Resource("Reservations", "/tuplespaces/{space:[.\\w]+}/reservations")
@@ -242,27 +239,25 @@ func (s *server) DeleteSpace(path *TupleSpacePath) error {
 
 func (s *server) Send(path *TupleSpacePath, req *SendRequest) (Tuple, error) {
 	space := s.getOrCreate(path.Space)
-	for _, tuple := range req.Tuples {
-		var ack Tuple
-		var err error
-		if req.Acknowledge {
-			ack, err = space.SendWithAcknowledgement(tuple, req.Expires)
-			if err == nil {
-				return ack, nil
-			}
-		} else {
-			err = space.Send(tuple, req.Expires)
+	var ack Tuple
+	var err error
+	if req.Acknowledge {
+		ack, err = space.SendWithAcknowledgement(req.Tuple, req.Expires)
+		if err == nil {
+			return ack, nil
 		}
-		if err == ErrTimeout {
-			return nil, rapid.Error(http.StatusGatewayTimeout, err.Error())
-		} else if err != nil {
-			return nil, rapid.Error(http.StatusInternalServerError, err.Error())
-		}
+	} else {
+		err = space.Send(req.Tuple, req.Expires)
+	}
+	if err == ErrTimeout {
+		return nil, rapid.Error(http.StatusGatewayTimeout, err.Error())
+	} else if err != nil {
+		return nil, rapid.Error(http.StatusInternalServerError, err.Error())
 	}
 	return nil, nil
 }
 
-func (s *server) Read(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.CloseNotifierChannel) ([]Tuple, error) {
+func (s *server) Read(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.CloseNotifierChannel) (Tuple, error) {
 	space := s.getOrCreate(path.Space)
 	tuple, err := space.Consume(&ConsumeOptions{
 		Match:   query.Query,
@@ -272,10 +267,10 @@ func (s *server) Read(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.Cl
 	if err != nil {
 		return nil, rapid.Error(http.StatusInternalServerError, err.Error())
 	}
-	return []Tuple{tuple}, nil
+	return tuple, nil
 }
 
-func (s *server) Take(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.CloseNotifierChannel) ([]Tuple, error) {
+func (s *server) Take(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.CloseNotifierChannel) (Tuple, error) {
 	space := s.getOrCreate(path.Space)
 	tuple, err := space.Consume(&ConsumeOptions{
 		Match:   query.Query,
@@ -286,7 +281,7 @@ func (s *server) Take(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.Cl
 	if err != nil {
 		return nil, rapid.Error(http.StatusInternalServerError, err.Error())
 	}
-	return []Tuple{tuple}, nil
+	return tuple, nil
 }
 
 func (s *server) Reserve(path *TupleSpacePath, req *ReservationRequest, cancel rapid.CloseNotifierChannel) (*ReservationResponse, error) {

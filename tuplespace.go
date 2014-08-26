@@ -24,6 +24,13 @@ var (
 
 type Tuple map[string]interface{}
 
+type ConsumeOptions struct {
+	Match   string
+	Timeout time.Duration
+	Take    bool
+	Cancel  <-chan bool // Cancel can be used to cancel a waiting consume.
+}
+
 type tupleOrError struct {
 	err   error
 	tuple Tuple
@@ -38,12 +45,16 @@ type tupleEntry struct {
 func (t *tupleEntry) Failed(err error) {
 	if t.ack != nil {
 		t.ack <- tupleOrError{err: err}
+		close(t.ack)
+		t.ack = nil
 	}
 }
 
 func (t *tupleEntry) Processed(tuple Tuple) {
 	if t.ack != nil {
 		t.ack <- tupleOrError{tuple: tuple}
+		close(t.ack)
+		t.ack = nil
 	}
 }
 
@@ -295,7 +306,6 @@ func (t *TupleSpace) Read(match string, timeout time.Duration) (Tuple, error) {
 	entry, err := t.consume(&ConsumeOptions{
 		Match:   match,
 		Timeout: timeout,
-		Take:    false,
 	})
 	if err != nil {
 		return nil, err
@@ -325,13 +335,6 @@ func (t *TupleSpace) ReserveWithCancel(match string, timeout time.Duration, rese
 
 func (t *TupleSpace) Reserve(match string, timeout time.Duration, reservationTimeout time.Duration) (*Reservation, error) {
 	return t.ReserveWithCancel(match, timeout, reservationTimeout, nil)
-}
-
-type ConsumeOptions struct {
-	Match   string
-	Timeout time.Duration
-	Take    bool
-	Cancel  <-chan bool // Cancel can be used to cancel a waiting consume.
 }
 
 func (t *TupleSpace) consume(req *ConsumeOptions) (*tupleEntry, error) {
