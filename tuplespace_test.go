@@ -130,7 +130,7 @@ func TestSendWithAcknowledgementTimesOut(t *testing.T) {
 	ts := New()
 	errors := make(chan error, 1)
 	go func() {
-		_, err := ts.SendWithAcknowledgement(Tuple{"i": 10}, time.Millisecond*100)
+		err := ts.SendWithAcknowledgement(Tuple{"i": 10}, time.Millisecond*100)
 		errors <- err
 	}()
 	assert.Equal(t, ErrTimeout, <-errors)
@@ -140,7 +140,7 @@ func TestSendWithAcknowledgement(t *testing.T) {
 	ts := New()
 	errors := make(chan error, 1)
 	go func() {
-		_, err := ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
+		err := ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
 		errors <- err
 	}()
 	tuple, err := ts.Take("i", 0)
@@ -153,7 +153,7 @@ func TestSendWithAcknowledgementAndMultipleReads(t *testing.T) {
 	ts := New()
 	errors := make(chan error, 1)
 	go func() {
-		_, err := ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
+		err := ts.SendWithAcknowledgement(Tuple{"i": 10}, 0)
 		errors <- err
 	}()
 	tuple, err := ts.Read("i", 0)
@@ -181,7 +181,7 @@ func TestReservationComplete(t *testing.T) {
 	ts.Send(Tuple{}, 0)
 	r, err := ts.Reserve("", time.Second, time.Millisecond*50)
 	assert.Equal(t, 0, ts.Status().Tuples.Count)
-	err = r.Complete(nil)
+	err = r.Complete()
 	assert.NoError(t, err)
 	assert.Equal(t, 0, ts.Status().Tuples.Count)
 	time.Sleep(time.Millisecond * 100)
@@ -200,17 +200,15 @@ func TestReservationCancel(t *testing.T) {
 
 func TestReservationCompleteWithAcknowledgement(t *testing.T) {
 	ts := New()
-	res := make(chan tupleOrError)
+	errors := make(chan error)
 	go func() {
-		ack, err := ts.SendWithAcknowledgement(Tuple{"a": 10}, 0)
-		res <- tupleOrError{tuple: ack, err: err}
+		errors <- ts.SendWithAcknowledgement(Tuple{"a": 10}, 0)
 	}()
 	r, err := ts.Reserve("", 0, time.Second*10)
 	assert.NoError(t, err)
-	r.Complete(Tuple{"b": 20})
-	te := <-res
-	assert.NoError(t, te.err)
-	assert.Equal(t, te.tuple, Tuple{"b": 20})
+	r.Complete()
+	err = <-errors
+	assert.NoError(t, err)
 }
 
 func BenchmarkTupleSend(b *testing.B) {

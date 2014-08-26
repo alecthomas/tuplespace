@@ -18,7 +18,7 @@ func TestServiceDeadlock(t *testing.T) {
 		errors <- err
 	}()
 	<-started
-	_, err := s.Send(path, &SendRequest{
+	err := s.Send(path, &SendRequest{
 		Tuple: Tuple{},
 	})
 	assert.NoError(t, err)
@@ -29,7 +29,7 @@ func TestServiceDeadlock(t *testing.T) {
 		errors <- err
 	}()
 	<-started
-	_, err = s.Send(path, &SendRequest{
+	err = s.Send(path, &SendRequest{
 		Tuple: Tuple{},
 	})
 	assert.NoError(t, err)

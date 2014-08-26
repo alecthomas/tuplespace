@@ -31,31 +31,16 @@ type ConsumeOptions struct {
 	Cancel  <-chan bool // Cancel can be used to cancel a waiting consume.
 }
 
-type tupleOrError struct {
-	err   error
-	tuple Tuple
-}
-
 type tupleEntry struct {
 	Tuple   Tuple
 	Expires time.Time
-	ack     chan tupleOrError
+	ack     chan error
 }
 
-func (t *tupleEntry) Failed(err error) {
-	if t.ack != nil {
-		t.ack <- tupleOrError{err: err}
-		close(t.ack)
-		t.ack = nil
-	}
-}
-
-func (t *tupleEntry) Processed(tuple Tuple) {
-	if t.ack != nil {
-		t.ack <- tupleOrError{tuple: tuple}
-		close(t.ack)
-		t.ack = nil
-	}
+func (t *tupleEntry) Processed(err error) {
+	defer func() { _ = recover() }()
+	t.ack <- err
+	close(t.ack)
 }
 
 type tupleEntries struct {
@@ -106,7 +91,7 @@ func (t *tupleEntries) ConsumeMatch(take bool, m *TupleMatcher) *tupleEntry {
 	now := time.Now()
 	for entry := range t.entries {
 		if entry.Expires.Before(now) {
-			entry.Failed(ErrTimeout)
+			entry.Processed(ErrTimeout)
 			delete(t.entries, entry)
 		} else if m == nil || m.Match(entry.Tuple) {
 			entry.Processed(nil)
@@ -242,10 +227,9 @@ func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) error {
 	return nil
 }
 
-// SendWithAcknowledgement sends a tuple and waits for an acknowledgement.  A
-// normal Take() or Read() will result in a nil ack. By using Reserve() +
-// Complete(tuple) you can ack with a tuple.
-func (t *TupleSpace) SendWithAcknowledgement(tuple Tuple, expires time.Duration) (ack Tuple, err error) {
+// SendWithAcknowledgement sends a tuple and waits for an acknowledgement that
+// the tuple has been processed.
+func (t *TupleSpace) SendWithAcknowledgement(tuple Tuple, expires time.Duration) error {
 	if expires == 0 {
 		expires = MaxTupleLifetime
 	}
@@ -255,10 +239,10 @@ func (t *TupleSpace) SendWithAcknowledgement(tuple Tuple, expires time.Duration)
 	case <-timeout:
 		// FIXME: There's a race here. The tuple may still be consumed in the
 		// window after this timeout.
-		return nil, ErrTimeout
+		return ErrTimeout
 
-	case te := <-entry.ack:
-		return te.tuple, te.err
+	case err := <-entry.ack:
+		return err
 	}
 }
 
@@ -266,14 +250,10 @@ func (t *TupleSpace) sendTuple(tuple Tuple, expires time.Duration, ack bool) *tu
 	if expires == 0 || expires > MaxTupleLifetime {
 		expires = MaxTupleLifetime
 	}
-	var ackch chan tupleOrError
-	if ack {
-		ackch = make(chan tupleOrError, 1)
-	}
 	entry := &tupleEntry{
 		Tuple:   tuple,
 		Expires: time.Now().Add(expires),
-		ack:     ackch,
+		ack:     make(chan error, 1),
 	}
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -420,13 +400,13 @@ func (r *Reservation) Tuple() Tuple {
 	return r.entry.Tuple
 }
 
-func (r *Reservation) Complete(tuple Tuple) error {
+func (r *Reservation) Complete() error {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	if !r.tomb.Alive() {
 		return r.tomb.Err()
 	}
-	r.entry.Processed(tuple)
+	r.entry.Processed(nil)
 	r.tomb.Kill(nil)
 	return r.tomb.Wait()
 }

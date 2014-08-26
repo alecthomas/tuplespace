@@ -77,8 +77,7 @@ type ReservationResponse struct {
 }
 
 type EndReservationRequest struct {
-	Cancel bool  `json:"cancel"`
-	Tuple  Tuple `json:"tuple"`
+	Cancel bool `json:"cancel"`
 }
 
 // Service definition for the TupleSpace RESTful service.
@@ -237,24 +236,23 @@ func (s *server) DeleteSpace(path *TupleSpacePath) error {
 	return nil
 }
 
-func (s *server) Send(path *TupleSpacePath, req *SendRequest) (Tuple, error) {
+func (s *server) Send(path *TupleSpacePath, req *SendRequest) error {
 	space := s.getOrCreate(path.Space)
-	var ack Tuple
 	var err error
 	if req.Acknowledge {
-		ack, err = space.SendWithAcknowledgement(req.Tuple, req.Expires)
+		err = space.SendWithAcknowledgement(req.Tuple, req.Expires)
 		if err == nil {
-			return ack, nil
+			return nil
 		}
 	} else {
 		err = space.Send(req.Tuple, req.Expires)
 	}
 	if err == ErrTimeout {
-		return nil, rapid.Error(http.StatusGatewayTimeout, err.Error())
+		return rapid.Error(http.StatusGatewayTimeout, err.Error())
 	} else if err != nil {
-		return nil, rapid.Error(http.StatusInternalServerError, err.Error())
+		return rapid.Error(http.StatusInternalServerError, err.Error())
 	}
-	return nil, nil
+	return nil
 }
 
 func (s *server) Read(path *TupleSpacePath, query *ConsumeQuery, cancel rapid.CloseNotifierChannel) (Tuple, error) {
@@ -311,5 +309,5 @@ func (s *server) EndReservation(path *ReservationPath, req *EndReservationReques
 	if req.Cancel {
 		return reservation.Cancel()
 	}
-	return reservation.Complete(req.Tuple)
+	return reservation.Complete()
 }
