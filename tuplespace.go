@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alecthomas/expr"
 	"gopkg.in/tomb.v2"
 )
 
@@ -22,7 +23,7 @@ var (
 	ErrCancelled          = errors.New("cancelled")
 )
 
-type Tuple map[string]interface{}
+type Tuple expr.V
 
 type ConsumeOptions struct {
 	Match   string
@@ -92,7 +93,7 @@ func (t *tupleEntries) Copy() []*tupleEntry {
 	return entries
 }
 
-func (t *tupleEntries) ConsumeMatch(take, all bool, m *TupleMatcher) (entries []*tupleEntry) {
+func (t *tupleEntries) ConsumeMatch(take, all bool, m *expr.Expression) (entries []*tupleEntry) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	now := time.Now()
@@ -100,7 +101,7 @@ func (t *tupleEntries) ConsumeMatch(take, all bool, m *TupleMatcher) (entries []
 		if entry.Expires.Before(now) {
 			entry.Processed(ErrTimeout)
 			delete(t.entries, entry)
-		} else if m == nil || m.Match(entry.Tuple) {
+		} else if m == nil || m.Bool(expr.V(entry.Tuple)) {
 			entry.Processed(nil)
 			if take {
 				delete(t.entries, entry)
@@ -115,7 +116,7 @@ func (t *tupleEntries) ConsumeMatch(take, all bool, m *TupleMatcher) (entries []
 }
 
 type waiter struct {
-	match   *TupleMatcher
+	match   *expr.Expression
 	expires <-chan time.Time
 	tuple   chan *tupleEntry
 	take    bool
@@ -151,7 +152,7 @@ func (w *waiters) Try(entry *tupleEntry) (taken bool, ok bool) {
 	defer w.lock.Unlock()
 
 	for waiter := range w.waiters {
-		if waiter.match.Match(entry.Tuple) {
+		if waiter.match.Bool(expr.V(entry.Tuple)) {
 			waiter.tuple <- entry
 			delete(w.waiters, waiter)
 			w.seenCount++
@@ -344,7 +345,7 @@ func (t *TupleSpace) Take(match string, timeout time.Duration, reservationTimeou
 }
 
 func (t *TupleSpace) consume(req *ConsumeOptions) ([]*tupleEntry, error) {
-	m, err := Match("%s", req.Match)
+	m, err := expr.Compile(req.Match)
 	if err != nil {
 		return nil, err
 	}

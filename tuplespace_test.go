@@ -85,6 +85,15 @@ func TestTupleSpaceTakeWaitTimeout(t *testing.T) {
 	assert.Equal(t, ErrTimeout, err)
 }
 
+func TestTupleSpaceCompleteAfterReservationTimeout(t *testing.T) {
+	ts := New()
+	ts.Send(Tuple{"a": 1}, 0)
+	r, err := ts.Take("", 0, time.Millisecond*100)
+	assert.NoError(t, err)
+	time.Sleep(time.Millisecond * 200)
+	assert.Equal(t, ErrReservationTimeout, r.Complete())
+}
+
 func TestTupleSpaceTakeConcurrent(t *testing.T) {
 	ts := New()
 	go func() {
@@ -94,16 +103,20 @@ func TestTupleSpaceTakeConcurrent(t *testing.T) {
 	}()
 	tuples := make(chan Tuple, 1000)
 	wg := sync.WaitGroup{}
+	errors := make(chan error, 10)
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for i := 0; i < 100; i++ {
-				reservation, err := ts.Take("i", 0, 0)
-				assert.NoError(t, err)
+				reservation, err := ts.Take("", 0, 0)
+				if err != nil {
+					errors <- err
+					return
+				}
 				reservation.Complete()
 				tuples <- reservation.Tuple()
 			}
-			wg.Done()
 		}()
 	}
 	wg.Wait()

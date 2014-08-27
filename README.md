@@ -2,11 +2,12 @@
 
 This is an implementation of a [tuple space](http://www.mcs.anl.gov/~itf/dbpp/text/node44.html) as a RESTful HTTP service.
 
-It has the following constraints and/or features:
-
-- "Tuples" are arbitrary maps. *Strict tuples are less obvious and more restrictive in how they can be used.*
-- Tuples can be matched using arbitrary expressions. eg. `age > 36`. *Again, to bypass the restrictions of strict tuple matching.*
+- Tuples are inherently unreliable and may disappear at any time, including before their timeout.
+- "Tuples" are arbitrary maps.
+- Tuples can be matched using arbitrary expressions. eg. `age > 36 && id % 2 == 0`.
 - Senders can wait (with optional timeout) for a tuple to be processed by a receiver.
+- Subsequent reads may return the same tuple.
+- Take operations are performed inside a [reservation](#reservations).
 
 ## Example
 
@@ -39,28 +40,15 @@ The following operations are supported:
 
 ### Reservations
 
-A reservation is effectively a two-phase commit, where a client maintains exclusive access to a tuple for the period of the reservation. The client can then mark the tuple as processed or cancelled, or it may time out. A tuple is returned to the space if it times out or is cancelled. No other clients may consume the tuple while it is reserved.
-
-All `Take()` operations are issued within a reservation.
+A reservation (`Take()`) provides timed, exclusive access to a tuple. If neither a `Complete()` nor a `Cancel()` are called on the reservation before the reservation times out, it is returned to the tuple space.
 
 ### Scalability
 
-The tuple space service can be scaled by simply adding nodes. Clients discover new server nodes by repeatedly reading tuples from a management space.
+Due to the constraints around the provided operations, the tuple space service can be scaled by simply adding nodes. Clients discover new server nodes by periodically reading all tuples from a management space. All clients connect to all servers simultaneously.
 
-## Background
-
-A tuple space is a shared communication medium where tuples are posted and receivers take or read tuples that match a pattern.
-
-The original definition of a tuple space supported tuples in the formal sense:
-
-		("age", 10)
-		("age", 20)
-
-and tuple matches in this form:
-
-		("age", ?)
-
-This turns out to be quite restrictive, so this implementation is really only *inspired* by tuple spaces and not strictly adherent to the formal definition.## RESTful tuplespace server
+- `Read()` should be issued to multiple servers at once. One result is then used, and the remainder discarded.
+- `Take()` should be issued to multiple servers at once. One reservation is then used and the rest are cancelled.
+-  `Send()` and `SendWithAcknowledgement()` should be sent round-robin to all servers.
 
 ### Installation
 
