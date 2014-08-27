@@ -130,11 +130,11 @@ func Definition() *schema.Schema {
 		Response(http.StatusGatewayTimeout, nil).
 		Response(http.StatusInternalServerError, nil)
 	tuples.Route("Read", "/tuplespaces/{space:[.\\w]+}/tuples").
-		Description("Read a tuple from the space.").
+		Description("Read tuples from the space.").
 		Get().
 		Path(&TupleSpacePath{}).
 		Query(&ReadQuery{}).
-		Response(http.StatusOK, tuplespace.Tuple{}).
+		Response(http.StatusOK, []tuplespace.Tuple{}).
 		Response(http.StatusGatewayTimeout, nil)
 
 	reservations := d.Resource("Reservations", "/tuplespaces/{space:[.\\w]+}/reservations")

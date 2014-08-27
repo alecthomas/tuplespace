@@ -206,27 +206,34 @@ func (t *TupleSpace) Close() error {
 	return t.waiters.Close()
 }
 
+type TuplesStatus struct {
+	Count int `json:"count"`
+	Seen  int `json:"seen"`
+}
+
+type WaitersStatus struct {
+	Count int `json:"count"`
+	Seen  int `json:"seen"`
+}
+
 type Status struct {
-	Tuples struct {
-		Count int `json:"count"`
-		Seen  int `json:"seen"`
-	} `json:"tuples"`
-	Waiters struct {
-		Count    int `json:"count"`
-		Seen     int `json:"seen"`
-		TimedOut int `json:"timed_out"`
-	} `json:"waiters"`
+	Tuples  TuplesStatus  `json:"tuples"`
+	Waiters WaitersStatus `json:"waiters"`
 }
 
 func (t *TupleSpace) Status() *Status {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	status := &Status{}
-	status.Tuples.Count = t.entries.Size()
-	status.Tuples.Seen = t.entries.Seen()
-	status.Waiters.Count = t.waiters.Size()
-	status.Waiters.Seen = t.waiters.Seen()
-	return status
+	return &Status{
+		Tuples: TuplesStatus{
+			Count: t.entries.Size(),
+			Seen:  t.entries.Seen(),
+		},
+		Waiters: WaitersStatus{
+			Count: t.waiters.Size(),
+			Seen:  t.waiters.Seen(),
+		},
+	}
 }
 
 func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) {

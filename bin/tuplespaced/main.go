@@ -14,7 +14,7 @@ import (
 
 var (
 	bindFlag = kingpin.Flag("bind", "Bind address for service.").Default("127.0.0.1:2619").TCP()
-	ramlFlag = kingpin.Flag("raml", "Dump RAML service definition.").Bool()
+	ramlFlag = kingpin.Flag("raml", "Dump RAML service definition.").Hidden().Bool()
 	goFlag   = kingpin.Flag("go", "Generate Go client code.").Hidden().Bool()
 )
 
@@ -26,7 +26,7 @@ func main() {
 		return
 	}
 	if *goFlag {
-		err := schema.SchemaToGoClient(service.Definition(), true, "github.com/alecthomas/tuplespace", os.Stdout)
+		err := schema.SchemaToGoClient(service.Definition(), true, "github.com/alecthomas/tuplespace/service", os.Stdout)
 		kingpin.FatalIfError(err, "failed to generate Go client")
 		return
 	}
