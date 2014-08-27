@@ -9,7 +9,7 @@ import (
 	"github.com/alecthomas/util"
 
 	"github.com/alecthomas/kingpin"
-	"github.com/alecthomas/tuplespace"
+	"github.com/alecthomas/tuplespace/service"
 )
 
 var (
@@ -21,16 +21,16 @@ var (
 func main() {
 	util.Bootstrap(kingpin.CommandLine, util.AllModules, nil)
 	if *ramlFlag {
-		err := schema.SchemaToRAML("http://"+(*bindFlag).String(), tuplespace.Service(), os.Stdout)
+		err := schema.SchemaToRAML("http://"+(*bindFlag).String(), service.Definition(), os.Stdout)
 		kingpin.FatalIfError(err, "failed to generate RAML service definition")
 		return
 	}
 	if *goFlag {
-		err := schema.SchemaToGoClient(tuplespace.Service(), true, "github.com/alecthomas/tuplespace", os.Stdout)
+		err := schema.SchemaToGoClient(service.Definition(), true, "github.com/alecthomas/tuplespace", os.Stdout)
 		kingpin.FatalIfError(err, "failed to generate Go client")
 		return
 	}
-	server, err := tuplespace.Server()
+	server, err := service.Server()
 	kingpin.FatalIfError(err, "failed to create new server")
 	err = http.ListenAndServe((*bindFlag).String(), server)
 	kingpin.FatalIfError(err, "server failed")

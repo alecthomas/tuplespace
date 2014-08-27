@@ -15,13 +15,13 @@ In two separate terminals, run the following commands at the same time.
 
 Send a tuple and wait for it to be processed:
 
-		$ curl --data-binary '{"tuple": {"age": 20}, "ack": true}' http://localhost:2619/tuplespaces/users/tuples
+		$ curl --data-binary '{"tuples": [{"age": 20}], "ack": true}' http://localhost:2619/tuplespaces/users/tuples
 		{"s":201}
 
-Take a tuple (also marking it as processed):
+Read a tuple (also marking it as processed):
 
-		$ curl -X DELETE http://localhost:2619/tuplespaces/users/tuples
-		{"s":200,"d":{"age":20}}
+		$ curl http://localhost:2619/tuplespaces/users/tuples
+		{"s":200,"d":[{"age":20}]}
 
 ## Operations
 

@@ -1,4 +1,4 @@
-package tuplespace
+package service
 
 import (
 	"fmt"
