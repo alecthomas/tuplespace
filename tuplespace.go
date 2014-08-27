@@ -236,14 +236,16 @@ func (t *TupleSpace) Status() *Status {
 	}
 }
 
-func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) {
+func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) error {
 	t.sendTuple(tuple, expires, false)
+	return nil
 }
 
-func (t *TupleSpace) SendMany(tuples []Tuple, expires time.Duration) {
+func (t *TupleSpace) SendMany(tuples []Tuple, expires time.Duration) error {
 	for _, tuple := range tuples {
 		t.sendTuple(tuple, expires, false)
 	}
+	return nil
 }
 
 // SendWithAcknowledgement sends a tuple and waits for an acknowledgement that

@@ -1,73 +1,87 @@
 package service
 
 import (
+	"net/rpc"
 	"time"
 
 	"github.com/alecthomas/tuplespace"
 )
 
 type Client struct {
-	c *tupleSpaceClient
+	client *rpc.Client
 }
 
-func Dial(url string) (*Client, error) {
-	c, err := dialTupleSpace(url)
+func Dial(addr string) (*Client, error) {
+	c, err := rpc.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 	return &Client{
-		c: c,
+		client: c,
 	}, nil
 }
 
-func (c *Client) Space(space string) *ClientSpace {
-	return &ClientSpace{c: c.c, space: space}
+func (c *Client) Close() error {
+	return c.client.Close()
 }
 
-func (c *Client) Close() error {
-	return nil
+func (c *Client) Space(space string) *ClientSpace {
+	return &ClientSpace{
+		space:  space,
+		client: c.client,
+	}
 }
 
 type ClientSpace struct {
-	c     *tupleSpaceClient
-	space string
-}
-
-func (c *ClientSpace) Close() error {
-	return nil
+	space  string
+	client *rpc.Client
 }
 
 func (c *ClientSpace) Status() (*tuplespace.Status, error) {
-	return c.c.SpaceStatus(c.space)
+	req := &StatusRequest{
+		Space: c.space,
+	}
+	rep := &tuplespace.Status{}
+	return rep, c.client.Call("TupleSpace.Status", req, rep)
+}
+
+func (c *ClientSpace) send(ack bool, tuples []tuplespace.Tuple, expires time.Duration) error {
+	req := &SendRequest{
+		Space:       c.space,
+		Tuples:      tuples,
+		Expires:     expires,
+		Acknowledge: ack,
+	}
+	rep := &SendResponse{}
+	return c.client.Call("TupleSpace.Send", req, rep)
 }
 
 func (c *ClientSpace) Send(tuple tuplespace.Tuple, expires time.Duration) error {
-	return c.c.Send(c.space, &SendRequest{
-		Tuples:  []tuplespace.Tuple{tuple},
-		Expires: expires,
-	})
+	return c.send(false, []tuplespace.Tuple{tuple}, expires)
 }
 
 func (c *ClientSpace) SendMany(tuples []tuplespace.Tuple, expires time.Duration) error {
-	return c.c.Send(c.space, &SendRequest{
-		Tuples:  tuples,
-		Expires: expires,
-	})
+	return c.send(false, tuples, expires)
 }
 
 func (c *ClientSpace) SendWithAcknowledgement(tuple tuplespace.Tuple, expires time.Duration) error {
-	return c.c.Send(c.space, &SendRequest{
-		Tuples:      []tuplespace.Tuple{tuple},
-		Expires:     expires,
-		Acknowledge: true,
-	})
+	return c.send(true, []tuplespace.Tuple{tuple}, expires)
+}
+
+func (c *ClientSpace) read(all bool, match string, timeout time.Duration) ([]tuplespace.Tuple, error) {
+	req := &ReadRequest{
+		Space:   c.space,
+		Match:   match,
+		Timeout: timeout,
+		All:     all,
+	}
+	rep := []tuplespace.Tuple{}
+	err := c.client.Call("TupleSpace.Read", req, &rep)
+	return rep, err
 }
 
 func (c *ClientSpace) Read(match string, timeout time.Duration) (tuplespace.Tuple, error) {
-	tuples, err := c.c.Read(c.space, &ReadQuery{
-		Query:   match,
-		Timeout: timeout,
-	})
+	tuples, err := c.read(false, match, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -75,35 +89,32 @@ func (c *ClientSpace) Read(match string, timeout time.Duration) (tuplespace.Tupl
 }
 
 func (c *ClientSpace) ReadAll(match string, timeout time.Duration) ([]tuplespace.Tuple, error) {
-	return c.c.Read(c.space, &ReadQuery{
-		Query:   match,
-		Timeout: timeout,
-		All:     true,
-	})
+	return c.read(true, match, timeout)
 }
 
 func (c *ClientSpace) Take(match string, timeout time.Duration, reservationTimeout time.Duration) (*ClientReservation, error) {
-	r, err := c.c.Take(c.space, &TakeRequest{
-		Query:              match,
+	req := &TakeRequest{
+		Space:              c.space,
+		Match:              match,
 		Timeout:            timeout,
 		ReservationTimeout: reservationTimeout,
-	})
+	}
+	rep := &TakeResponse{}
+	err := c.client.Call("TupleSpace.Take", req, rep)
 	if err != nil {
 		return nil, err
 	}
 	return &ClientReservation{
-		c:     c.c,
-		space: c.space,
-		id:    r.ID,
-		tuple: r.Tuple,
+		client: c.client,
+		tuple:  rep.Tuple,
+		id:     rep.Reservation,
 	}, nil
 }
 
 type ClientReservation struct {
-	c     *tupleSpaceClient
-	space string
-	id    int64
-	tuple tuplespace.Tuple
+	client *rpc.Client
+	tuple  tuplespace.Tuple
+	id     int64
 }
 
 func (c *ClientReservation) Tuple() tuplespace.Tuple {
@@ -111,9 +122,18 @@ func (c *ClientReservation) Tuple() tuplespace.Tuple {
 }
 
 func (c *ClientReservation) Complete() error {
-	return c.c.EndReservation(c.space, c.id, &EndReservationRequest{})
+	return c.end(false)
 }
 
 func (c *ClientReservation) Cancel() error {
-	return c.c.EndReservation(c.space, c.id, &EndReservationRequest{Cancel: true})
+	return c.end(true)
+}
+
+func (c *ClientReservation) end(cancel bool) error {
+	req := &EndTakeRequest{
+		Reservation: c.id,
+		Cancel:      cancel,
+	}
+	rep := &EndTakeResponse{}
+	return c.client.Call("TupleSpace.EndTake", req, rep)
 }

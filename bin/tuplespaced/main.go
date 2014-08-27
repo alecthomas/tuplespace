@@ -1,37 +1,33 @@
 package main
 
 import (
-	"net/http"
-	"os"
+	"net"
+	"net/rpc"
 
-	"github.com/alecthomas/rapid/schema"
-
+	"github.com/alecthomas/go-logging"
+	"github.com/alecthomas/kingpin"
 	"github.com/alecthomas/util"
 
-	"github.com/alecthomas/kingpin"
 	"github.com/alecthomas/tuplespace/service"
 )
 
 var (
+	log = logging.MustGetLogger("tuplespaced")
+
 	bindFlag = kingpin.Flag("bind", "Bind address for service.").Default("127.0.0.1:2619").TCP()
-	ramlFlag = kingpin.Flag("raml", "Dump RAML service definition.").Hidden().Bool()
-	goFlag   = kingpin.Flag("go", "Generate Go client code.").Hidden().Bool()
 )
 
 func main() {
 	util.Bootstrap(kingpin.CommandLine, util.AllModules, nil)
-	if *ramlFlag {
-		err := schema.SchemaToRAML("http://"+(*bindFlag).String(), service.Definition(), os.Stdout)
-		kingpin.FatalIfError(err, "failed to generate RAML service definition")
-		return
+	s := service.New()
+	err := rpc.Register(s)
+	kingpin.FatalIfError(err, "")
+	bind, err := net.Listen("tcp", (*bindFlag).String())
+	kingpin.FatalIfError(err, "")
+	for {
+		conn, err := bind.Accept()
+		kingpin.FatalIfError(err, "")
+		log.Infof("New connection %s -> %s", conn.RemoteAddr(), conn.LocalAddr())
+		go rpc.ServeConn(conn)
 	}
-	if *goFlag {
-		err := schema.SchemaToGoClient(service.Definition(), true, "github.com/alecthomas/tuplespace/service", os.Stdout)
-		kingpin.FatalIfError(err, "failed to generate Go client")
-		return
-	}
-	server, err := service.Server()
-	kingpin.FatalIfError(err, "failed to create new server")
-	err = http.ListenAndServe((*bindFlag).String(), server)
-	kingpin.FatalIfError(err, "server failed")
 }

@@ -1,9 +1,9 @@
-# A RESTful tuple space server [![Build Status](https://travis-ci.org/alecthomas/tuplespace.png)](https://travis-ci.org/alecthomas/tuplespace)
+# A tuple space server for Go. [![Build Status](https://travis-ci.org/alecthomas/tuplespace.png)](https://travis-ci.org/alecthomas/tuplespace)
 
-This is an implementation of a [tuple space](http://www.mcs.anl.gov/~itf/dbpp/text/node44.html) as a RESTful HTTP service.
+This is an implementation of a [tuple space](http://www.mcs.anl.gov/~itf/dbpp/text/node44.html) as a [Go RPC service](http://golang.org/pkg/net/rpc/).
 
+- "Tuples" are maps.
 - Tuples are inherently unreliable and may disappear at any time, including before their timeout.
-- "Tuples" are arbitrary maps.
 - Tuples can be matched using arbitrary expressions. eg. `age > 36 && id % 2 == 0`.
 - Senders can wait (with optional timeout) for a tuple to be processed by a receiver.
 - Subsequent reads may return the same tuple.
@@ -34,7 +34,7 @@ The following operations are supported:
 - `SendWithAcknowledgement(tuple, expires)` - Send a tuple and wait for it to be processed.
 - `Take(match, timeout, reservationTimeout) -> Reservation`
 
-`TakeAll()` is not supported. To support such an operation would require server-server coordination, which is deliberately outside the scope of the server implementation.
+`TakeAll()` is not supported. To support such an operation in a distributed environment would require server-server coordination, which is explicitly outside the scope of this implementation.
 
 ## Features
 
