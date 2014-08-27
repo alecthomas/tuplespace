@@ -34,7 +34,10 @@ var (
 
 func main() {
 	command := kingpin.Parse()
-	client, err := service.Dial((*tuplespaceFlag).String())
+	factory, err := service.Dial((*tuplespaceFlag).String())
+	kingpin.FatalIfError(err, "")
+	defer factory.Close()
+	client, err := factory.Dial()
 	kingpin.FatalIfError(err, "")
 	defer client.Close()
 	space := client.Space(*spaceFlag)

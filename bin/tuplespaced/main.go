@@ -1,8 +1,11 @@
 package main
 
 import (
+	"io"
 	"net"
 	"net/rpc"
+
+	"github.com/hashicorp/yamux"
 
 	"github.com/alecthomas/go-logging"
 	"github.com/alecthomas/kingpin"
@@ -28,6 +31,24 @@ func main() {
 		conn, err := bind.Accept()
 		kingpin.FatalIfError(err, "")
 		log.Infof("New connection %s -> %s", conn.RemoteAddr(), conn.LocalAddr())
-		go rpc.ServeConn(conn)
+		go func(conn net.Conn) {
+			session, err := yamux.Server(conn, nil)
+			if err != nil {
+				log.Errorf("Failed to start multiplexer: %s", err)
+				return
+			}
+			defer session.Close()
+			for {
+				stream, err := session.Accept()
+				if err == io.EOF {
+					return
+				}
+				if err != nil {
+					log.Errorf("Failed to accept new stream on multiplexed connection: %s", err)
+					return
+				}
+				go rpc.ServeConn(stream)
+			}
+		}(conn)
 	}
 }

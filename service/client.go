@@ -1,24 +1,50 @@
 package service
 
 import (
+	"net"
 	"net/rpc"
 	"time"
+
+	"github.com/hashicorp/yamux"
 
 	"github.com/alecthomas/tuplespace"
 )
 
-type Client struct {
-	client *rpc.Client
+type ClientFactory struct {
+	conn    net.Conn
+	session *yamux.Session
 }
 
-func Dial(addr string) (*Client, error) {
-	c, err := rpc.Dial("tcp", addr)
+func Dial(addr string) (*ClientFactory, error) {
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{
-		client: c,
+	session, err := yamux.Client(conn, nil)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &ClientFactory{
+		conn:    conn,
+		session: session,
 	}, nil
+}
+
+func (c *ClientFactory) Close() error {
+	return c.session.Close()
+}
+
+func (c *ClientFactory) Dial() (*Client, error) {
+	conn, err := c.session.Open()
+	if err != nil {
+		return nil, err
+	}
+	return &Client{client: rpc.NewClient(conn)}, nil
+}
+
+type Client struct {
+	client *rpc.Client
 }
 
 func (c *Client) Close() error {

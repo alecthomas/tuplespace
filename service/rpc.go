@@ -42,7 +42,6 @@ type StatusRequest struct {
 func (t *TupleSpace) Status(req *StatusRequest, rep *tuplespace.Status) error {
 	space := t.get(req.Space)
 	status := space.Status()
-	fmt.Printf("%+v\n", status)
 	*rep = *status
 	return nil
 }
