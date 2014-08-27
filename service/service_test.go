@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchrcom/testify/assert"
+
+	"github.com/alecthomas/tuplespace"
 )
 
 func TestServiceDeadlock(t *testing.T) {
@@ -19,7 +21,7 @@ func TestServiceDeadlock(t *testing.T) {
 	}()
 	<-started
 	err := s.Send(path, &SendRequest{
-		Tuples: []Tuple{Tuple{}},
+		Tuples: []tuplespace.Tuple{tuplespace.Tuple{}},
 	})
 	assert.NoError(t, err)
 	assert.NoError(t, <-errors)
@@ -30,7 +32,7 @@ func TestServiceDeadlock(t *testing.T) {
 	}()
 	<-started
 	err = s.Send(path, &SendRequest{
-		Tuples: []Tuple{Tuple{}},
+		Tuples: []tuplespace.Tuple{tuplespace.Tuple{}},
 	})
 	assert.NoError(t, err)
 	assert.NoError(t, <-errors)
@@ -40,7 +42,7 @@ func BenchmarkServiceSend(b *testing.B) {
 	s := newServer()
 	defer s.Close()
 	for i := 0; i < b.N; i++ {
-		s.Send(&TupleSpacePath{Space: "test"}, &SendRequest{Tuples: []Tuple{Tuple{"a": 10}}})
+		s.Send(&TupleSpacePath{Space: "test"}, &SendRequest{Tuples: []tuplespace.Tuple{tuplespace.Tuple{"a": 10}}})
 	}
 }
 
@@ -49,7 +51,7 @@ func benchmarkReadN(b *testing.B, n int) {
 	defer s.Close()
 	path := &TupleSpacePath{Space: "test"}
 	for i := 0; i < n; i++ {
-		s.Send(path, &SendRequest{Tuples: []Tuple{Tuple{"a": i}}})
+		s.Send(path, &SendRequest{Tuples: []tuplespace.Tuple{tuplespace.Tuple{"a": i}}})
 	}
 	q := fmt.Sprintf("a > %d", n/2)
 	b.ResetTimer()
@@ -80,7 +82,7 @@ func BenchmarkServiceTake(b *testing.B) {
 	defer s.Close()
 	path := &TupleSpacePath{Space: "test"}
 	for i := 0; i < b.N; i++ {
-		s.Send(path, &SendRequest{Tuples: []Tuple{Tuple{"a": i}}})
+		s.Send(path, &SendRequest{Tuples: []tuplespace.Tuple{tuplespace.Tuple{"a": i}}})
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
