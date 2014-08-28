@@ -10,57 +10,57 @@ import (
 	"github.com/alecthomas/tuplespace"
 )
 
-type ClientFactory struct {
-	conn    net.Conn
+type Client struct {
+	addr    string
 	session *yamux.Session
 }
 
-func Dial(addr string) (*ClientFactory, error) {
+// Dial creats a new connection to a TupleSpace server.
+func Dial(addr string) (*Client, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	session, err := yamux.Client(conn, nil)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return &ClientFactory{
-		conn:    conn,
-		session: session,
-	}, nil
+	return Hijack(conn)
 }
 
-func (c *ClientFactory) Close() error {
+func Hijack(conn net.Conn) (*Client, error) {
+	session, err := yamux.Client(conn, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{addr: conn.RemoteAddr().String(), session: session}, nil
+}
+
+func (c *Client) RemoteAddr() string {
+	return c.addr
+}
+
+func (c *Client) Close() error {
 	return c.session.Close()
 }
 
-func (c *ClientFactory) Dial() (*Client, error) {
+// Space creates a new multiplexed connection to the given space. This is a
+// low-overhead operation, but not without cost.
+func (c *Client) Space(space string) (*ClientSpace, error) {
 	conn, err := c.session.Open()
 	if err != nil {
 		return nil, err
 	}
-	return &Client{client: rpc.NewClient(conn)}, nil
-}
-
-type Client struct {
-	client *rpc.Client
-}
-
-func (c *Client) Close() error {
-	return c.client.Close()
-}
-
-func (c *Client) Space(space string) *ClientSpace {
-	return &ClientSpace{
-		space:  space,
-		client: c.client,
-	}
+	return &ClientSpace{client: rpc.NewClient(conn), space: space}, nil
 }
 
 type ClientSpace struct {
 	space  string
 	client *rpc.Client
+}
+
+func (c *ClientSpace) Name() string {
+	return c.space
+}
+
+func (c *ClientSpace) Close() error {
+	return c.client.Close()
 }
 
 func (c *ClientSpace) Status() (*tuplespace.Status, error) {

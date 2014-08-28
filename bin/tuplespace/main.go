@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/alecthomas/kingpin"
 
@@ -37,10 +38,9 @@ func main() {
 	factory, err := service.Dial((*tuplespaceFlag).String())
 	kingpin.FatalIfError(err, "")
 	defer factory.Close()
-	client, err := factory.Dial()
+	space, err := factory.Space(*spaceFlag)
 	kingpin.FatalIfError(err, "")
-	defer client.Close()
-	space := client.Space(*spaceFlag)
+	defer space.Close()
 	switch command {
 	case "status":
 		status, err := space.Status()
@@ -51,7 +51,12 @@ func main() {
 	case "send":
 		tuple := tuplespace.Tuple{}
 		for k, v := range *sendtupleArg {
-			tuple[k] = v
+			n, err := strconv.ParseFloat(v, 64)
+			if err == nil {
+				tuple[k] = n
+			} else {
+				tuple[k] = v
+			}
 		}
 		if *sendCopiesflag > 0 {
 			tuples := []tuplespace.Tuple{}

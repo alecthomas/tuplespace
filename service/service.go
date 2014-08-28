@@ -1,3 +1,4 @@
+// Package service is the implementation of the TupleSpace service and its client.
 package service
 
 import (
@@ -16,6 +17,7 @@ type TupleSpace struct {
 	reservations       map[int64]*tuplespace.Reservation
 }
 
+// New creates a new TupleSpace RPC service.
 func New() *TupleSpace {
 	return &TupleSpace{
 		spaces:             map[string]*tuplespace.TupleSpace{},
@@ -64,7 +66,7 @@ func (t *TupleSpace) Send(req *SendRequest, rep *SendResponse) error {
 		}
 		err = space.SendWithAcknowledgement(req.Tuples[0], req.Expires)
 	} else {
-		space.SendMany(req.Tuples, req.Expires)
+		err = space.SendMany(req.Tuples, req.Expires)
 	}
 	*rep = struct{}{}
 	return err

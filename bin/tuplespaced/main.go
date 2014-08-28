@@ -41,8 +41,10 @@ func main() {
 			for {
 				stream, err := session.Accept()
 				if err == io.EOF {
+					log.Infof("Connection %s -> %s terminated", conn.RemoteAddr(), conn.LocalAddr())
 					return
 				}
+				log.Infof("New session on %s -> %s", conn.RemoteAddr(), conn.LocalAddr())
 				if err != nil {
 					log.Errorf("Failed to accept new stream on multiplexed connection: %s", err)
 					return
