@@ -5,12 +5,12 @@ import (
 	"log"
 	"net"
 	"net/rpc"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/alecthomas/tuplespace"
-
 	"github.com/stretchrcom/testify/assert"
 )
 
@@ -28,6 +28,7 @@ func listenTCP() (net.Listener, string) {
 }
 
 func startServer() {
+	runtime.GOMAXPROCS(runtime.NumCPU() * 2)
 	rpc.Register(New())
 	var l net.Listener
 	l, serverAddr = listenTCP()
@@ -62,28 +63,49 @@ func TestServerSend(t *testing.T) {
 }
 
 func BenchmarkServerSend(b *testing.B) {
-	c := dial("BenchmarkServerSend")
-	bob := tuplespace.Tuple{"name": "bob", "age": 60}
-	for i := 0; i < b.N; i++ {
-		c.Send(bob, time.Second*5)
+	wg := sync.WaitGroup{}
+	n := runtime.NumCPU()
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := dial("BenchmarkServerSend")
+			defer c.Close()
+			bob := tuplespace.Tuple{"name": "bob", "age": 60}
+			for i := 0; i < b.N/n; i++ {
+				c.Send(bob, time.Second*5)
+			}
+
+		}()
 	}
+	wg.Wait()
 }
 
 func benchmarkServerTakeN(n int, b *testing.B) {
-	c := dial(fmt.Sprintf("BenchmarkServerTake%d", n))
-	tuple := tuplespace.Tuple{"i": 0}
-	for i := 0; i < b.N/n; i++ {
-		for j := 0; j < n; j++ {
-			c.Send(tuple, 0)
-		}
-		for j := 0; j < n; j++ {
-			r, err := c.Take("", 0, 0)
-			if err != nil {
-				panic(err)
+	wg := sync.WaitGroup{}
+	ncpu := runtime.NumCPU()
+	for i := 0; i < ncpu; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := dial(fmt.Sprintf("BenchmarkServerTake%d", n))
+			defer c.Close()
+			tuple := tuplespace.Tuple{"i": 0}
+			for i := 0; i < b.N/n/ncpu; i++ {
+				for j := 0; j < n; j++ {
+					c.Send(tuple, 0)
+				}
+				for j := 0; j < n/ncpu; j++ {
+					r, err := c.Take("", 0, 0)
+					if err != nil {
+						panic(err)
+					}
+					r.Complete()
+				}
 			}
-			r.Complete()
-		}
+		}()
 	}
+	wg.Wait()
 }
 
 func BenchmarkServerTake1(b *testing.B) {
