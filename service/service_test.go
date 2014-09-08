@@ -69,28 +69,35 @@ func BenchmarkServerSend(b *testing.B) {
 	}
 }
 
-func benchmarkServerReadN(n int, b *testing.B) {
-	c := dial(fmt.Sprintf("BenchmarkServerRead%d", n))
-	for i := 0; i < n; i++ {
-		c.Send(tuplespace.Tuple{"id": i}, time.Second*5)
+func benchmarkServerTakeN(n int, b *testing.B) {
+	c := dial(fmt.Sprintf("BenchmarkServerTake%d", n))
+	tuple := tuplespace.Tuple{"i": 0}
+	for i := 0; i < b.N/n; i++ {
+		for j := 0; j < n; j++ {
+			c.Send(tuple, 0)
+		}
+		for j := 0; j < n; j++ {
+			r, err := c.Take("", 0, 0)
+			if err != nil {
+				panic(err)
+			}
+			r.Complete()
+		}
 	}
-	for i := 0; i < b.N; i++ {
-		c.Read("id == 0", 0)
-	}
 }
 
-func BenchmarkServerRead1(b *testing.B) {
-	benchmarkServerReadN(1, b)
+func BenchmarkServerTake1(b *testing.B) {
+	benchmarkServerTakeN(1, b)
 }
 
-func BenchmarkServerRead10(b *testing.B) {
-	benchmarkServerReadN(10, b)
+func BenchmarkServerTake10(b *testing.B) {
+	benchmarkServerTakeN(10, b)
 }
 
-func BenchmarkServerRead100(b *testing.B) {
-	benchmarkServerReadN(100, b)
+func BenchmarkServerTake100(b *testing.B) {
+	benchmarkServerTakeN(100, b)
 }
 
-func BenchmarkServerRead1000(b *testing.B) {
-	benchmarkServerReadN(1000, b)
+func BenchmarkServerTake1000(b *testing.B) {
+	benchmarkServerTakeN(1000, b)
 }
