@@ -27,6 +27,7 @@ func main() {
 	kingpin.FatalIfError(err, "")
 	bind, err := net.Listen("tcp", (*bindFlag).String())
 	kingpin.FatalIfError(err, "")
+	log.Infof("Started TupleSpace on %s", *bindFlag)
 	for {
 		conn, err := bind.Accept()
 		kingpin.FatalIfError(err, "")

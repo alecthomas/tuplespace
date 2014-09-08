@@ -3,6 +3,7 @@ package cluster
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ var (
 	OperationTimeout = time.Second * 15
 
 	ErrNoPeers = errors.New("no peers remaining")
+	ErrTimeout = errors.New("timeout")
 )
 
 type Logger interface {
@@ -32,41 +34,56 @@ type Logger interface {
 	Errorf(fmt string, args ...interface{}) error
 }
 
+// Observe adding and removal of clients to the cluster client.
+type clientObserver interface {
+	// Notify observer about a client being added. If the method returns an
+	// error the client will be closed.
+	addClient(client *service.Client) error
+	// Notify observer that a client has been removed.
+	removeClient(addr string)
+}
+
+// Maintains client connections to the active peers in the cluster.
 type clients struct {
-	lock    sync.Mutex
-	tomb    tomb.Tomb
-	log     Logger
-	keys    []string
-	clients map[string]*service.Client
-	backoff map[string]backoff.BackOff
-	next    map[string]time.Time
+	lock      sync.Mutex
+	log       Logger
+	keys      []string
+	clients   map[string]*service.Client
+	backoff   map[string]backoff.BackOff
+	next      map[string]time.Time
+	observers map[clientObserver]struct{}
 }
 
 func newClients(log Logger) *clients {
 	c := &clients{
-		clients: map[string]*service.Client{},
-		backoff: map[string]backoff.BackOff{},
-		next:    map[string]time.Time{},
+		clients:   map[string]*service.Client{},
+		backoff:   map[string]backoff.BackOff{},
+		next:      map[string]time.Time{},
+		observers: map[clientObserver]struct{}{},
 	}
-	c.tomb.Go(c.run)
+	c.addObserver(c)
 	return c
 }
+
+func (c *clients) Space(space string) *ClientSpace {
+	s := newClientSpace(space, c)
+	c.addObserver(s)
+	return s
+}
+
+func (c *clients) addClient(client *service.Client) error {
+	go c.monitor(client)
+	return nil
+}
+
+func (c *clients) removeClient(addr string) {}
 
 func (c *clients) Close() error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	c.tomb.Kill(nil)
-	for _, client := range c.clients {
-		client.Close()
+	for addr := range c.clients {
+		c.delete(addr)
 	}
-	return nil
-}
-
-func (c *clients) run() error {
-	for _, client := range c.clients {
-		go c.monitor(client)
-	}
-	<-c.tomb.Dying()
 	return nil
 }
 
@@ -75,7 +92,7 @@ func (c *clients) monitor(client *service.Client) {
 	space, err := client.Space(".cluster.peers")
 	if err != nil {
 		c.log.Errorf("Could not connect to .cluster.peers on %s, marking dead.", client.RemoteAddr())
-		c.dead(client)
+		c.Dead(client.RemoteAddr())
 		return
 	}
 	for {
@@ -83,7 +100,7 @@ func (c *clients) monitor(client *service.Client) {
 		peers, err := space.ReadAll("", PeerHeartbeatPeriod)
 		if err != nil {
 			c.log.Errorf("Failed to read peer list from %s, marking dead.", client.RemoteAddr())
-			c.dead(client)
+			c.Dead(client.RemoteAddr())
 			return
 		}
 		for _, peer := range peers {
@@ -104,99 +121,7 @@ func (c *clients) monitor(client *service.Client) {
 	}
 }
 
-// Send addresses of all known peers to the given space.
-// func (c *clients) heartbeat(space *service.ClientSpace) error {
-// 	c.lock.Lock()
-// 	defer c.lock.Unlock()
-// 	tuples := make([]tuplespace.Tuple, 0, len(c.clients))
-// 	for addr := range c.clients {
-// 		tuples = append(tuples, tuplespace.Tuple{"addr": addr})
-// 	}
-// 	return space.SendMany(tuples, PeerTimeout)
-// }
-
-type Operation func(*service.ClientSpace) error
-
-// SendRandom sends tuples to a random set of peers.
-func (c *clients) SendRandom(space string, tuples []tuplespace.Tuple, expires time.Duration, timeout time.Duration) error {
-	// NOTE: We don't use a sync.WaitGroup here because we can't use select
-	// with it.
-
-	// Track worker completion.
-	workers := 0
-	workersch := make(chan bool)
-	// Track tuples successfully delivered.
-	acks := 0
-	acksch := make(chan int, len(tuples))
-	// Send tuples to workers.
-	tuplesch := make(chan tuplespace.Tuple)
-
-	// Start one worker per peer.
-	c.lock.Lock()
-	for _, client := range c.clients {
-		workers++
-		go func(client *service.Client) {
-			defer func() { workersch <- true }()
-			s, err := client.Space(space)
-			if err != nil {
-				c.log.Errorf("Couldn't connect to space %s on %s, marking dead.", space, client.RemoteAddr())
-				c.dead(client)
-				return
-			}
-			for tuple := range tuplesch {
-				if err := s.Send(tuple, expires); err != nil {
-					c.log.Errorf("Couldn't send to %s on %s, marking dead.", space, client.RemoteAddr())
-					c.dead(client)
-					// Send the tuple back for a retry.
-					tuplesch <- tuple
-					return
-				}
-				acksch <- 1
-			}
-		}(client)
-	}
-	c.lock.Unlock()
-
-	timeoutEnd := time.Now().Add(timeout)
-	for _, tuple := range tuples {
-		select {
-		case tuplesch <- tuple:
-		case <-workersch:
-			workers--
-			// We ran out of workers before we ran out of tuples :(
-			// TODO: Check if there are any live clients and spin up new workers.
-			if workers <= 0 {
-				return ErrNoPeers
-			}
-		case n := <-acksch:
-			acks += n
-		case <-time.After(timeoutEnd.Sub(time.Now())):
-			close(tuplesch)
-		}
-	}
-
-COMPLETION:
-	for {
-		select {
-		case <-workersch:
-			workers--
-			if workers <= 0 {
-				break
-			}
-		case n := <-acksch:
-			acks += n
-			if acks >= len(tuples) {
-				break COMPLETION
-			}
-		case <-time.After(timeoutEnd.Sub(time.Now())):
-			close(tuplesch)
-			return fmt.Errorf("timed out before sending all tuples")
-		}
-	}
-	return nil
-}
-
-// Update the client connection fro an address. If the connection exists, do
+// Update the client connection for an address. If the connection exists, do
 // nothing. If it does not exist, attempt to reconnect. Reconnects are rate
 // limited.
 func (c *clients) update(addr string) error {
@@ -233,11 +158,23 @@ func (c *clients) canUpdate(addr string) bool {
 	return !ok || time.Now().After(next)
 }
 
-func (c *clients) dead(client *service.Client) {
+// Mark a client as dead.
+func (c *clients) Dead(addr string) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	delete(c.clients, client.RemoteAddr())
-	c.updateKeys()
+	c.delete(addr)
+}
+
+func (c *clients) delete(addr string) {
+	// TODO: This should deal with observers blocking...
+	for observer := range c.observers {
+		observer.removeClient(addr)
+	}
+	if client, ok := c.clients[addr]; ok {
+		delete(c.clients, addr)
+		c.updateKeys()
+		client.Close()
+	}
 }
 
 func (c *clients) updateKeys() {
@@ -253,10 +190,36 @@ func (c *clients) Size() int {
 	return len(c.clients)
 }
 
-type Client struct {
-	lock    sync.Mutex
-	log     Logger
-	clients *clients
+// Random returns a random client from available clients.
+func (c *clients) Random() (*service.Client, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	count := len(c.clients)
+	if count == 0 {
+		return nil, ErrNoPeers
+	}
+	n := rand.Intn(count)
+	key := c.keys[n]
+	return c.clients[key], nil
+}
+
+func (c *clients) addObserver(observer clientObserver) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	for addr, client := range c.clients {
+		// TODO: This should deal with observers blocking...
+		err := observer.addClient(client)
+		if err != nil {
+			c.delete(addr)
+		}
+	}
+	c.observers[observer] = struct{}{}
+}
+
+func (c *clients) removeObserver(observer clientObserver) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	delete(c.observers, observer)
 }
 
 type nullLogger struct{}
@@ -264,6 +227,12 @@ type nullLogger struct{}
 func (nullLogger) Infof(fmt string, args ...interface{}) error    { return nil }
 func (nullLogger) Warningf(fmt string, args ...interface{}) error { return nil }
 func (nullLogger) Errorf(fmt string, args ...interface{}) error   { return nil }
+
+type Client struct {
+	lock    sync.Mutex
+	log     Logger
+	clients *clients
+}
 
 func Dial(seeds []string) (*Client, error) {
 	clients := newClients(nullLogger{})
@@ -278,6 +247,12 @@ func Dial(seeds []string) (*Client, error) {
 	return &Client{clients: clients}, nil
 }
 
+func (c *Client) Close() error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.clients.Close()
+}
+
 func (c *Client) SetLogger(log Logger) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -285,19 +260,295 @@ func (c *Client) SetLogger(log Logger) {
 }
 
 func (c *Client) Space(space string) (*ClientSpace, error) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	return &ClientSpace{
-		space:   space,
-		clients: c.clients,
-	}, nil
+	return c.clients.Space(space), nil
 }
 
+// ClientSpace maintains a current list of clients to all cluster peers, for a
+// particular space.
 type ClientSpace struct {
+	lock    sync.Mutex
 	space   string
 	clients *clients
+	keys    []string
+	spaces  map[string]*service.ClientSpace
+}
+
+func newClientSpace(space string, clients *clients) *ClientSpace {
+	return &ClientSpace{
+		space:   space,
+		clients: clients,
+		spaces:  map[string]*service.ClientSpace{},
+	}
+}
+
+func (c *ClientSpace) addClient(client *service.Client) error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	space, err := client.Space(c.space)
+	if err != nil {
+		return err
+	}
+	c.keys = append(c.keys, client.RemoteAddr())
+	c.spaces[client.RemoteAddr()] = space
+	return nil
+}
+
+func (c *ClientSpace) removeClient(addr string) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	delete(c.spaces, addr)
+	// Rebuild key slice.
+	c.keys = []string{}
+	for key := range c.spaces {
+		c.keys = append(c.keys, key)
+	}
+}
+
+// Get a copy of all known clients.
+func (c *ClientSpace) allClients() map[string]*service.ClientSpace {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	clients := make(map[string]*service.ClientSpace, len(c.spaces))
+	for addr, client := range c.spaces {
+		clients[addr] = client
+	}
+	return clients
+}
+
+func (c *ClientSpace) randomClient() (string, *service.ClientSpace) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	n := rand.Intn(len(c.keys))
+	key := c.keys[n]
+	return key, c.spaces[key]
+}
+
+func (c *ClientSpace) Close() error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.clients.removeObserver(c)
+	for _, client := range c.spaces {
+		client.Close()
+	}
+	return nil
+}
+
+func (c *ClientSpace) Status() (*tuplespace.Status, error) {
+	// Collect status from all clients into statuses.
+	lock := sync.Mutex{}
+	statuses := []*tuplespace.Status{}
+	action := func(c *service.ClientSpace) error {
+		status, err := c.Status()
+		if err == nil {
+			lock.Lock()
+			statuses = append(statuses, status)
+			lock.Unlock()
+		}
+		return err
+	}
+
+	if err := newBatch(c).All(action).Wait(); err != nil {
+		return nil, err
+	}
+	status := &tuplespace.Status{}
+	for _, s := range statuses {
+		status.Tuples.Count += s.Tuples.Count
+		status.Tuples.Seen += s.Tuples.Seen
+		status.Waiters.Count += s.Waiters.Count
+		status.Waiters.Seen += s.Waiters.Seen
+	}
+	return status, nil
 }
 
 func (c *ClientSpace) Send(tuple tuplespace.Tuple, expires time.Duration) error {
-	return c.clients.SendRandom(c.space, []tuplespace.Tuple{tuple}, expires, OperationTimeout)
+	return c.SendMany([]tuplespace.Tuple{tuple}, expires)
+}
+
+func (c *ClientSpace) SendMany(tuples []tuplespace.Tuple, expires time.Duration) error {
+	batch := newBatch(c)
+	for _, tuple := range tuples {
+		batch.Random(func(s *service.ClientSpace) error {
+			return s.Send(tuple, expires)
+		})
+	}
+	return batch.Wait()
+}
+
+func (c *ClientSpace) SendWithAcknowledgement(tuple tuplespace.Tuple, expires time.Duration) error {
+	return newBatch(c).
+		Random(func(s *service.ClientSpace) error { return s.SendWithAcknowledgement(tuple, expires) }).
+		Wait()
+}
+
+func (c *ClientSpace) Read(match string, timeout time.Duration) (out tuplespace.Tuple, err error) {
+	err = newBatch(c).
+		Random(func(c *service.ClientSpace) error {
+		return nil
+	}).
+		Wait()
+	return
+}
+
+func (c *ClientSpace) ReadAll(match string, timeout time.Duration) ([]tuplespace.Tuple, error) {
+	b := newBatch(c)
+	tuples := make(chan []tuplespace.Tuple, b.Size())
+	b.All(func(c *service.ClientSpace) error {
+		t, err := c.ReadAll(match, timeout)
+		if err != nil {
+			return err
+		}
+		tuples <- t
+		return nil
+	})
+	if err := b.Wait(); err != nil {
+		return nil, err
+	}
+	out := []tuplespace.Tuple{}
+	for t := range tuples {
+		out = append(out, t...)
+	}
+	return out, nil
+}
+
+func (c *ClientSpace) Take(match string, timeout time.Duration, reservationTimeout time.Duration) (reservation *service.ClientReservation, err error) {
+	reservations := make(chan *service.ClientReservation)
+	err = newBatch(c).First(func(cancel cancelAction, c *service.ClientSpace) error {
+		errors := make(chan error)
+		// reservations := make(chan *service.ClientReservation)
+		go func() {
+			reservation, err := c.Take(match, timeout, reservationTimeout)
+			if err != nil {
+				errors <- err
+			} else {
+				reservations <- reservation
+			}
+		}()
+		select {
+		case err := <-errors:
+			return err
+		case reservation = <-reservations:
+			close(cancel)
+		case <-cancel:
+			c.Close()
+		}
+		return err
+	}).Wait()
+	return
+}
+
+// A batch operation on a space.
+type batch struct {
+	tomb tomb.Tomb
+	c    *ClientSpace
+}
+
+func newBatch(c *ClientSpace) *batch {
+	return &batch{c: c}
+}
+
+func (b *batch) Wait() error {
+	return b.tomb.Wait()
+}
+
+func (b *batch) Size() int {
+	return b.c.clients.Size()
+}
+
+// Run action on all clients in parallel. If all clients fail, the batch will
+// fail. A single success results in success.
+func (b *batch) All(action func(*service.ClientSpace) error) *batch {
+	clients := b.c.allClients()
+	errors := make(chan error)
+
+	// Goroutine to manage errors.
+	b.tomb.Go(func() error {
+		var lastError error
+		expected := len(clients)
+		failed := 0
+		for i := 0; i < expected; i++ {
+			err := <-errors
+			if err != nil {
+				failed++
+				lastError = err
+			}
+		}
+		if failed == len(clients) {
+			return lastError
+		}
+		return nil
+	})
+
+	for addr, client := range clients {
+		b.tomb.Go(func() error {
+			err := action(client)
+			if err != nil {
+				b.c.clients.Dead(addr)
+			}
+			errors <- err
+			return nil
+		})
+	}
+	return b
+}
+
+type cancelAction chan struct{}
+
+func (c cancelAction) Cancel() {
+	close(c)
+}
+
+// Issue action to all clients in parallel, and accept the first.
+func (b *batch) First(action func(cancelAction, *service.ClientSpace) error) *batch {
+	cancel := make(cancelAction)
+	b.All(func(c *service.ClientSpace) error {
+		errors := make(chan error)
+		go func() { errors <- action(cancel, c) }()
+		select {
+		case err := <-errors:
+			if err != nil {
+				cancel.Cancel()
+			}
+			return err
+
+		case <-cancel:
+			c.Close()
+			// FIXME: Don't close the TCP connection here. Instead, close and
+			// reopen the muxed connection.
+			b.c.clients.Dead(c.RemoteAddr())
+			return nil
+		}
+	})
+	return b
+}
+
+// Run action repeatedly until it succeeds or it reaches the maximum number of
+// retries.
+func (b *batch) Random(action func(*service.ClientSpace) error) *batch {
+	boff := backoff.NewExponentialBackOff()
+	boff.Reset()
+	work := func() error {
+		errors := make(chan error)
+		for {
+			key, client := b.c.randomClient()
+			go func() { errors <- action(client) }()
+			select {
+			case err := <-errors:
+				if err == nil {
+					return nil
+				}
+				b.c.clients.Dead(key)
+				d := boff.NextBackOff()
+				if d == backoff.Stop {
+					return err
+				}
+				time.Sleep(d)
+
+			case <-b.tomb.Dying():
+				client.Close()
+				return nil
+			}
+		}
+	}
+	b.tomb.Go(work)
+	return b
 }

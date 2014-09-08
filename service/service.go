@@ -7,11 +7,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gopkg.in/tomb.v2"
+
 	"github.com/alecthomas/tuplespace"
 )
 
 type TupleSpace struct {
 	lock               sync.Mutex
+	tomb               tomb.Tomb
 	spaces             map[string]*tuplespace.TupleSpace
 	reservationCounter int64
 	reservations       map[int64]*tuplespace.Reservation
@@ -19,11 +22,37 @@ type TupleSpace struct {
 
 // New creates a new TupleSpace RPC service.
 func New() *TupleSpace {
-	return &TupleSpace{
+	ts := &TupleSpace{
 		spaces:             map[string]*tuplespace.TupleSpace{},
 		reservationCounter: time.Now().UnixNano(),
 		reservations:       map[int64]*tuplespace.Reservation{},
 	}
+	ts.tomb.Go(ts.reaper)
+	return ts
+}
+
+// Periodically clear out expired reservations.
+func (t *TupleSpace) reaper() error {
+	for {
+		select {
+		case <-t.tomb.Dying():
+			return nil
+
+		case <-time.After(time.Second * 15):
+			t.lock.Lock()
+			for id, reservation := range t.reservations {
+				if reservation.Expired() {
+					delete(t.reservations, id)
+				}
+			}
+			t.lock.Unlock()
+		}
+	}
+}
+
+func (t *TupleSpace) close() error {
+	t.tomb.Kill(nil)
+	return t.tomb.Wait()
 }
 
 func (t *TupleSpace) get(space string) *tuplespace.TupleSpace {

@@ -21,10 +21,6 @@ func Dial(addr string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Hijack(conn)
-}
-
-func Hijack(conn net.Conn) (*Client, error) {
 	session, err := yamux.Client(conn, nil)
 	if err != nil {
 		return nil, err
@@ -47,12 +43,22 @@ func (c *Client) Space(space string) (*ClientSpace, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ClientSpace{client: rpc.NewClient(conn), space: space}, nil
+	return HijackConn(c.addr, space, conn), nil
 }
 
 type ClientSpace struct {
-	space  string
-	client *rpc.Client
+	addr  string
+	space string
+	rpc   *rpc.Client
+}
+
+// HijackConn starts a new RPC session for a tuple space, on an existing net.Conn.
+func HijackConn(addr, space string, conn net.Conn) *ClientSpace {
+	return &ClientSpace{addr: addr, rpc: rpc.NewClient(conn), space: space}
+}
+
+func (c *ClientSpace) RemoteAddr() string {
+	return c.addr
 }
 
 func (c *ClientSpace) Name() string {
@@ -60,7 +66,7 @@ func (c *ClientSpace) Name() string {
 }
 
 func (c *ClientSpace) Close() error {
-	return c.client.Close()
+	return c.rpc.Close()
 }
 
 func (c *ClientSpace) Status() (*tuplespace.Status, error) {
@@ -68,7 +74,7 @@ func (c *ClientSpace) Status() (*tuplespace.Status, error) {
 		Space: c.space,
 	}
 	rep := &tuplespace.Status{}
-	return rep, c.client.Call("TupleSpace.Status", req, rep)
+	return rep, c.rpc.Call("TupleSpace.Status", req, rep)
 }
 
 func (c *ClientSpace) send(ack bool, tuples []tuplespace.Tuple, expires time.Duration) error {
@@ -79,7 +85,7 @@ func (c *ClientSpace) send(ack bool, tuples []tuplespace.Tuple, expires time.Dur
 		Acknowledge: ack,
 	}
 	rep := &SendResponse{}
-	return c.client.Call("TupleSpace.Send", req, rep)
+	return c.rpc.Call("TupleSpace.Send", req, rep)
 }
 
 func (c *ClientSpace) Send(tuple tuplespace.Tuple, expires time.Duration) error {
@@ -102,7 +108,7 @@ func (c *ClientSpace) read(all bool, match string, timeout time.Duration) ([]tup
 		All:     all,
 	}
 	rep := []tuplespace.Tuple{}
-	err := c.client.Call("TupleSpace.Read", req, &rep)
+	err := c.rpc.Call("TupleSpace.Read", req, &rep)
 	return rep, err
 }
 
@@ -126,21 +132,21 @@ func (c *ClientSpace) Take(match string, timeout time.Duration, reservationTimeo
 		ReservationTimeout: reservationTimeout,
 	}
 	rep := &TakeResponse{}
-	err := c.client.Call("TupleSpace.Take", req, rep)
+	err := c.rpc.Call("TupleSpace.Take", req, rep)
 	if err != nil {
 		return nil, err
 	}
 	return &ClientReservation{
-		client: c.client,
-		tuple:  rep.Tuple,
-		id:     rep.Reservation,
+		rpc:   c.rpc,
+		tuple: rep.Tuple,
+		id:    rep.Reservation,
 	}, nil
 }
 
 type ClientReservation struct {
-	client *rpc.Client
-	tuple  tuplespace.Tuple
-	id     int64
+	rpc   *rpc.Client
+	tuple tuplespace.Tuple
+	id    int64
 }
 
 func (c *ClientReservation) Tuple() tuplespace.Tuple {
@@ -161,5 +167,5 @@ func (c *ClientReservation) end(cancel bool) error {
 		Cancel:      cancel,
 	}
 	rep := &EndTakeResponse{}
-	return c.client.Call("TupleSpace.EndTake", req, rep)
+	return c.rpc.Call("TupleSpace.EndTake", req, rep)
 }

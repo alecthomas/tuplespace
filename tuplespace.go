@@ -433,6 +433,11 @@ func (r *Reservation) run() error {
 	}
 }
 
+// Expired returns true if the reservation is no longer valid, for any reason.
+func (r *Reservation) Expired() bool {
+	return r.tomb.Err() != tomb.ErrStillAlive
+}
+
 func (r *Reservation) Wait() error {
 	return r.tomb.Wait()
 }

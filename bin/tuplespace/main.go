@@ -35,12 +35,13 @@ var (
 
 func main() {
 	command := kingpin.Parse()
-	factory, err := service.Dial((*tuplespaceFlag).String())
+	client, err := service.Dial((*tuplespaceFlag).String())
 	kingpin.FatalIfError(err, "")
-	defer factory.Close()
-	space, err := factory.Space(*spaceFlag)
+	defer client.Close()
+	space, err := client.Space(*spaceFlag)
 	kingpin.FatalIfError(err, "")
 	defer space.Close()
+
 	switch command {
 	case "status":
 		status, err := space.Status()
