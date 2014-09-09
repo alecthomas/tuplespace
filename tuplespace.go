@@ -260,12 +260,12 @@ func (t *TupleSpace) sendTuple(tuple Tuple, expires time.Duration, ack bool) *tu
 		ack:     ackch,
 	}
 	t.lock.Lock()
-	defer t.lock.Unlock()
-	t.status.Tuples.Count++
+	t.status.Tuples.Seen++
 	taken, ok := t.waiters.Try(entry)
 	if !taken || !ok {
 		t.addEntry(entry)
 	}
+	t.lock.Unlock()
 	return entry
 }
 
