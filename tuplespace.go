@@ -52,9 +52,8 @@ func (t *tupleEntry) Processed(err error) {
 }
 
 type tupleEntries struct {
-	lock      sync.Mutex
-	entries   map[*tupleEntry]struct{}
-	seenCount int
+	lock    sync.Mutex
+	entries map[*tupleEntry]struct{}
 }
 
 func (t *tupleEntries) Close() error {
@@ -70,17 +69,10 @@ func (t *tupleEntries) Size() int {
 	return len(t.entries)
 }
 
-func (t *tupleEntries) Seen() int {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	return t.seenCount
-}
-
 func (t *tupleEntries) Add(tuple *tupleEntry) {
 	t.lock.Lock()
-	defer t.lock.Unlock()
-	t.seenCount++
 	t.entries[tuple] = struct{}{}
+	t.lock.Unlock()
 }
 
 func (t *tupleEntries) Copy() []*tupleEntry {
@@ -128,15 +120,13 @@ func (w *waiter) Close() error {
 }
 
 type waiters struct {
-	lock      sync.Mutex
-	waiters   map[*waiter]struct{}
-	seenCount int
+	lock    sync.Mutex
+	waiters map[*waiter]struct{}
 }
 
 func (w *waiters) add(a *waiter) int {
 	w.lock.Lock()
 	defer w.lock.Unlock()
-	w.seenCount++
 	w.waiters[a] = struct{}{}
 	return len(w.waiters) - 1
 }
@@ -155,7 +145,6 @@ func (w *waiters) Try(entry *tupleEntry) (taken bool, ok bool) {
 		if waiter.match.Bool(expr.V(entry.Tuple)) {
 			waiter.tuple <- entry
 			delete(w.waiters, waiter)
-			w.seenCount++
 			return waiter.take, true
 		}
 	}
@@ -166,10 +155,6 @@ func (w *waiters) Size() int {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 	return len(w.waiters)
-}
-
-func (w *waiters) Seen() int {
-	return w.seenCount
 }
 
 func (w *waiters) Close() error {
@@ -186,6 +171,7 @@ type TupleSpace struct {
 	lock    sync.Mutex
 	entries tupleEntries
 	waiters waiters
+	status  Status
 }
 
 func New() *TupleSpace {
@@ -224,16 +210,9 @@ type Status struct {
 func (t *TupleSpace) Status() *Status {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	return &Status{
-		Tuples: TuplesStatus{
-			Count: t.entries.Size(),
-			Seen:  t.entries.Seen(),
-		},
-		Waiters: WaitersStatus{
-			Count: t.waiters.Size(),
-			Seen:  t.waiters.Seen(),
-		},
-	}
+	t.status.Tuples.Count = t.entries.Size()
+	t.status.Waiters.Count = t.waiters.Size()
+	return &t.status
 }
 
 func (t *TupleSpace) Send(tuple Tuple, expires time.Duration) error {
@@ -282,6 +261,7 @@ func (t *TupleSpace) sendTuple(tuple Tuple, expires time.Duration, ack bool) *tu
 	}
 	t.lock.Lock()
 	defer t.lock.Unlock()
+	t.status.Tuples.Count++
 	taken, ok := t.waiters.Try(entry)
 	if !taken || !ok {
 		t.addEntry(entry)
@@ -374,7 +354,9 @@ func (t *TupleSpace) consume(req *ConsumeOptions) ([]*tupleEntry, error) {
 		match:   m,
 		expires: expires,
 		tuple:   make(chan *tupleEntry),
+		take:    req.Take,
 	}
+	t.status.Waiters.Seen++
 	t.waiters.add(waiter)
 	t.lock.Unlock()
 
